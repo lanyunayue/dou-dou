@@ -1,0 +1,101 @@
+%% 05 · 增量时序图（从 05-增量架构设计与实施任务列表.md §5.2 / §5.3 抽取）
+%% 说明：包含两张 sequenceDiagram —— ① 请求→限流→认证→失败计数→锁定→审计；② 写→kill→重启→锁定状态恢复。
+%% 02 §6 的三张时序图（tools/call、dou.put 隔离区、桌面壳启动）原样保留在 02-sequence-diagram.mermaid，本件只画本轮增量。
+%% 内容以 05 主文档 §5 为准；本件仅便于下游工具复用，不写任何实现代码、不含测试用例。
+
+%% ============================================================
+%% 时序图 ① 请求 → 限流 → 认证 → 失败计数 → 锁定 → 审计（05 §5.2）
+%% ============================================================
+sequenceDiagram
+    autonumber
+    participant C as Agent 客户端
+    participant R as http/router + auth_layer
+    participant M as require_auth
+    participant RL as RateLimiter
+    participant LK as Lockout
+    participant SC as StateCache(写穿)
+    participant DB as DbPool / Repository
+    participant AW as AuditWriter
+    participant H as commands/* (handler)
+
+    C->>R: HTTP 请求 + Authorization: Bearer
+    R->>M: from_fn_with_state(state, req, next)
+    M->>M: ① path ∈ EXEMPT_PATHS?(/health)
+    alt /health 探活
+        M-->>C: 200 {"status":"ok"}（不计数/不写审计）
+    else 需鉴权端点（13 + /mcp）
+        M->>M: ② 解析 Bearer（全仓唯一解析点）→ SubjectKey
+        M->>RL: ③ check(subject_key, now_ms, cfg)
+        RL->>DB: with_tx 读/写 window_start_ms, window_count
+        DB-->>SC: 落库成功后刷新缓存
+        alt 超限
+            RL-->>M: Throttle{retry_after_ms}
+            M->>AW: write(auth_throttled)
+            M-->>C: 429 + 稳定码（-32001 族）
+        else 未超限
+            RL-->>M: Allow
+            M->>LK: ④ state(subject_key, now_ms)
+            LK->>DB: 读 locked_until_ms（读时判定解锁）
+            alt 锁定期内
+                LK-->>M: Locked{locked_until_ms}
+                M->>AW: write(auth_deny)
+                M-->>C: 429/401 + 稳定码
+            else 未锁 / 已到期自动解锁(写 auth_unlocked)
+                LK-->>M: Open
+                M->>DB: ⑤ MasterToken::verify(subtle) / get_by_hash(sha256)
+                alt 认证成功
+                    M->>LK: on_success() 清零失败计数
+                    M->>DB: 落库 → StateCache
+                    M->>M: ⑦ M_ONLY_PATHS 判定(D 越权→401+scope_deny)
+                    M->>M: req.extensions.insert(AuthContext)
+                    M->>H: next.run(req)
+                    H-->>C: 200 / 业务结果
+                else 认证失败
+                    M->>LK: ⑥ on_failure() +1
+                    LK->>DB: 写 failure_count/locked_until_ms → StateCache
+                    opt 达 lockout_threshold
+                        LK->>AW: write(auth_locked)
+                    end
+                    M->>AW: write(auth_deny)
+                    M-->>C: 401 + -32001
+                end
+            end
+        end
+    end
+    note over M,AW: 任一步 DB 异常 → fail-closed 401，不降级到 Master（02 §7.6 FC1）
+
+%% ============================================================
+%% 时序图 ② 写 → kill → 重启 → 锁定状态恢复（05 §5.3）
+%% ============================================================
+sequenceDiagram
+    autonumber
+    participant T as 认证失败流量（错令牌）
+    participant M as require_auth
+    participant SC as StateCache(写穿)
+    participant DB as DbPool / audit.db
+    participant P as 网关进程
+    participant BOOT as lib.rs::run() 启动
+
+    T->>M: 连续失败 × lockout_threshold（Anonymous 自指键）
+    M->>SC: write_through(Repository<AuthThrottleState>)
+    SC->>DB: ① 先落库：failure_count, backoff_exp,<br/>locked_until_ms, last_attempt_ms（*_ms INTEGER）
+    DB-->>SC: COMMIT 成功
+    SC->>SC: ② 再更新只读缓存（顺序不可颠倒）
+    M-->>T: 401 / 429 + auth_locked 审计
+
+    Note over P: 【kill】Stop-Process dou-gateway（build.ps1:33-38 / gate.ps1 前置）
+    P--xDB: 进程终止，内存态全丢（HashMap 一律不存在）
+
+    BOOT->>DB: DbPool::open（全仓唯一 Connection::open）→ migrate() 幂等
+    BOOT->>DB: ③ StateCache.restore(pool)：SELECT * FROM auth_throttle_state
+    DB-->>BOOT: subject_key / failure_count / locked_until_ms / backoff_exp 逐一恢复
+    BOOT->>BOOT: 组装 AppState + RateLimiter + Lockout（读恢复值）
+    T->>M: 重启后首个请求（同一 subject_key）
+    M->>DB: state() 读 locked_until_ms
+    alt now_ms < locked_until_ms
+        M-->>T: 仍锁定（与 kill 前逐一相等）→ 重启不是绕过锁定的后门
+    else now_ms ≥ locked_until_ms
+        M->>DB: 读时自动解锁 + auth_unlocked
+        M-->>T: Open（到期恢复正确）
+    end
+    Note over BOOT,DB: 验收：写→kill→重启 后失败计数/锁定到期时刻逐一相等（03 §5 专项 9 / 04 §8.2 出口 4）
