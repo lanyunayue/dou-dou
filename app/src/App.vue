@@ -209,7 +209,7 @@ const SSH_PORT = 22
 const SSH_USER = 'dou'
 const SSH_KEY = 'C:/Users/mrhua/AppData/Local/dou/keys/id_ed25519'
 
-const status = ref({ running: false, endpoint: 'http://127.0.0.1:7419/health' })
+const status = ref({ running: false, endpoint: 'http://127.0.0.1:7419/health', ssh_up: false })
 const navs = [{key:'term',label:'终端'},{key:'files',label:'文件'}]
 const view = ref('term')
 const termEl = ref<HTMLDivElement>()
@@ -225,8 +225,8 @@ const audit = ref<string[]>(['启动豆 Dou 桌面壳', '网关连接成功'])
 const broadcast = ref('')
 let windowFocused = true
 
-// 网关管理接口（本机回环，独立路由）——保持不变
-const GW = 'http://127.0.0.1:7419'
+// 网关地址固定由 Rust 侧 `gateway_request` 使用 http://127.0.0.1:7419，
+// 前端不再直连 fetch（WebView 跨域 CORS 会挡住响应读取）。
 
 // ---------- 统一鉴权请求层（唯一 fetch 出口） ----------
 // 令牌只在模块内存态缓存，绝不写 localStorage / 日志 / 源码 / 提交 / URL / body。
@@ -269,30 +269,37 @@ async function gwToken(): Promise<string> {
   return _gwTokenPending
 }
 
-// 唯一 HTTP 出口：注入 Authorization: Bearer <token> 与 Content-Type，保留调用方原有 method/body/headers。
+// 唯一网关请求出口：走 Tauri IPC -> Rust reqwest（绕开 WebView CORS 与系统代理）。
+// 令牌由 Rust 侧读 token.txt 并注入 Bearer；gwToken() 仅作 fail-closed 前置校验。
 async function gwFetch(path: string, opts: RequestInit = {}): Promise<Response> {
-  const token = await gwToken()          // 失败即中止，不发无令牌请求
-  const headers = new Headers(opts.headers)
-  headers.set('Authorization', `Bearer ${token}`)
-  if (opts.body != null && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-
-  let r: Response
+  await gwToken()                       // 失败即中止，绝不发无令牌请求
+  const method = String(opts.method || 'GET').toUpperCase()
+  const body = opts.body == null ? null : String(opts.body)
+  let status = 0
+  let text = ''
   try {
-    r = await fetch(`${GW}${path}`, { ...opts, headers })
-  } catch {
-    gwError.value = { code: 'GATEWAY_OFFLINE', message: '网关离线：无法连接 127.0.0.1:7419，请确认网关已启动', retryable: true }
+    const r = await invoke<{ status: number, body: string }>('gateway_request', { path, method, body })
+    status = r.status
+    text = r.body
+  } catch (e) {
+    gwError.value = { code: 'GATEWAY_OFFLINE', message: `网关离线：无法连接 127.0.0.1:7419（${String(e).slice(0, 90)}）`, retryable: true }
     throw new Error('网关离线')
   }
-  if (r.status === 401) {
+  if (status === 401) {
     gwError.value = { code: 'AUTH_FAILED', message: '鉴权失败（401）：令牌与网关不一致，请检查 DOU_DEV_TOKEN 与 token.txt 是否同源', retryable: true }
-  } else if (r.status === 429) {
-    gwError.value = { code: 'THROTTLED', message: '请求被限流（429）：请按 Retry-After 稍后重试，勿连续刷新（不自动风暴重试）', retryable: true }
-  } else if (!r.ok) {
-    gwError.value = { code: 'GATEWAY_OFFLINE', message: `网关返回异常状态 ${r.status}`, retryable: true }
+  } else if (status === 429) {
+    gwError.value = { code: 'THROTTLED', message: '请求被限流（429）：请按 Retry-After 稍后重试，勿连续刷新', retryable: true }
+  } else if (status < 200 || status >= 300) {
+    gwError.value = { code: 'GATEWAY_OFFLINE', message: `网关返回异常状态 ${status}`, retryable: true }
   } else {
     gwError.value = null
   }
-  return r
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => JSON.parse(text),
+    text: async () => text,
+  } as Response
 }
 
 // 占位符本地替换：仅用于展示 / 复制，绝不回传网络（/onboard/write 只 POST {client}）
@@ -322,7 +329,10 @@ function handleSshFailure(e: any, ctx: string) {
 const connSummary = computed(() => {
   if (!status.value.running) return '网关未就绪 · HTTP 管理功能不可用'
   if (gwError.value) return `网关在线 · ${gwError.value.message}`
-  const ssh = sshError.value ? '靶机未连接（终端/文件/传输不可用）' : '靶机已连接'
+  // 以 Rust 侧对 22 端口的真实探测为准，绝不因「没报过错」就写已连接。
+  const ssh = status.value.ssh_up
+    ? '靶机在线（终端/文件/传输可用）'
+    : '靶机未连接（22 端口不可达，终端/文件/传输不可用）'
   return `网关在线（HTTP 管理可用）· ${ssh}`
 })
 

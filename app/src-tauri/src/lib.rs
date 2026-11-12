@@ -12,13 +12,56 @@ static START_GATEWAY: Once = Once::new();
 struct GatewayStatus {
     running: bool,
     endpoint: String,
+    /// 真实探测 SSH 靶机 22 端口；不再用「没报错 = 已连接」推断，避免谎报在线。
+    ssh_up: bool,
+}
+
+fn ssh_target_up() -> bool {
+    use std::net::{SocketAddr, TcpStream};
+    let addr: SocketAddr = "127.0.0.1:22".parse().unwrap();
+    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
 }
 
 #[tauri::command]
 fn gateway_status() -> GatewayStatus {
     let endpoint = "http://127.0.0.1:7419/health".to_string();
     let running = match reqwest::blocking::get(&endpoint) { Ok(_) => true, Err(_) => false };
-    GatewayStatus { running, endpoint }
+    GatewayStatus { running, endpoint, ssh_up: ssh_target_up() }
+}
+
+/// 统一网关请求通道：令牌由 Rust 侧读取并注入，HTTP 由 reqwest 发出。
+/// 绕开 WebView 的 CORS 与系统代理（localhost:1420 -> 127.0.0.1:7419 属跨域），
+/// 也保证令牌不进入前端 fetch 作用域。
+#[derive(Serialize)]
+struct GwResponse {
+    status: u16,
+    body: String,
+}
+
+#[tauri::command]
+async fn gateway_request(path: String, method: String, body: Option<String>) -> Result<GwResponse, String> {
+    let token = gateway_token()?;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client: {e}"))?;
+    let m = match method.to_uppercase().as_str() {
+        "GET" => reqwest::Method::GET,
+        "POST" => reqwest::Method::POST,
+        "PUT" => reqwest::Method::PUT,
+        "DELETE" => reqwest::Method::DELETE,
+        _ => return Err(format!("unsupported method: {method}")),
+    };
+    let url = format!("http://127.0.0.1:7419{path}");
+    let mut req = client.request(m, &url).bearer_auth(token);
+    if let Some(b) = body {
+        req = req.header("Content-Type", "application/json").body(b);
+    }
+    let resp = req.send().await.map_err(|e| format!("gateway unreachable {url}: {e}"))?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    Ok(GwResponse { status, body: text })
 }
 
 // 【本轮新增】读取主令牌供前端注入 Bearer；只读、无副作用、不落日志。
@@ -133,7 +176,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, gateway_status, gateway_token, open_pty, pty_write, sftp_list, sftp_download, sftp_upload, sanitize_ansi, download_chunked, remote_stat, download_dir, upload_dir, download_resume])
+        .invoke_handler(tauri::generate_handler![greet, gateway_status, gateway_token, gateway_request, open_pty, pty_write, sftp_list, sftp_download, sftp_upload, sanitize_ansi, download_chunked, remote_stat, download_dir, upload_dir, download_resume])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
