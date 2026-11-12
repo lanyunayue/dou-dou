@@ -5,6 +5,7 @@
 
 mod audit;
 mod auth;
+mod authz;
 mod errors;
 mod hostkey;
 mod policy;
@@ -15,8 +16,10 @@ mod scope;
 mod snapshot;
 mod sftp;
 mod ssh;
+mod state;
 mod store;
 mod tasks;
+mod throttle;
 mod tools;
 
 use std::collections::HashMap;
@@ -24,8 +27,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, State},
+    http::StatusCode,
     response::{Html, Response},
     routing::{get, post},
     Router,
@@ -60,7 +63,11 @@ async fn main() {
     } else if let Err(e) = store::seed_builtin_rules() {
         eprintln!("[store] 内置规则写入失败: {e}");
     }
-    let dev = std::env::var("DOU_DEV_MODE").map(|v| v == "1").unwrap_or(true);
+    if let Err(e) = state::init_state_schema() {
+        eprintln!("[state] 状态表初始化失败: {e}");
+    }
+    // 默认关闭 dev：不显式设置 DOU_DEV_MODE=1 时，禁止本机命令兜底执行。
+    let dev = std::env::var("DOU_DEV_MODE").map(|v| v == "1").unwrap_or(false);
     let bind = std::env::var("DOU_BIND").unwrap_or_else(|_| DEFAULT_BIND.to_string());
 
     if !is_loopback(&bind) {
@@ -71,7 +78,7 @@ async fn main() {
     let sessions: Arc<tokio::sync::Mutex<HashMap<String, ssh::SshConnection>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
-    println!("[dou-gateway]  │ token  {token}");
+    println!("[dou-gateway]  │ token  {}", auth::mask_token(&token));
     println!("[dou-gateway]  │ audit  {}", audit_path.display());
     println!("[dou-gateway]  │ dev    {dev}");
 
@@ -173,7 +180,9 @@ async fn main() {
         .route("/onboard/config", get(onboard_config))
         .route("/onboard/write", axum::routing::post(onboard_write))
         .route("/console", get(console_page))
-        .with_state(state);
+        .with_state(state.clone())
+        // W-15：单层中间件统一收口全部路由；唯一 Bearer 解析点在 authz.rs。
+        .layer(axum::middleware::from_fn_with_state(state, authz::require_auth));
 
     let listener = match tokio::net::TcpListener::bind(&bind).await {
         Ok(l) => l,
@@ -189,8 +198,14 @@ async fn main() {
     }
 }
 
-async fn health() -> &'static str {
-    "ok"
+/// Q4 拍板前沿用架构建议：豁免鉴权 + 最小信息 + 不写审计。
+/// 改判只需改 `authz::EXEMPT_PATHS` 一处常量。
+async fn health() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json; charset=utf-8")
+        .body(r#"{"status":"ok"}"#.into())
+        .unwrap()
 }
 
 async fn audit_tail(State(st): State<AppState>) -> Response {
@@ -226,8 +241,13 @@ async fn audit_query(State(st): State<AppState>, uri: axum::http::Uri) -> Respon
 }
 
 async fn audit_verify(State(st): State<AppState>) -> Response {
+    let entries = audit::entry_count(&st.audit);
     let (ok, broken) = audit::verify_chain(&st.audit);
-    let body = serde_json::to_string(&json!({ "chain_ok": ok, "broken_index": broken }))
+    // 空链时 chain_ok=true 不代表已验证；必须同时给出 entries / verifiable。
+    let body = serde_json::to_string(&json!({
+        "chain_ok": ok, "broken_index": broken,
+        "entries": entries, "verifiable": entries > 0
+    }))
         .unwrap_or_default();
     Response::builder()
         .status(if ok { StatusCode::OK } else { StatusCode::CONFLICT })
@@ -285,7 +305,7 @@ code{{background:#f0efe9;padding:2px 6px;border-radius:3px;}} .ok{{color:#3d6b4f
 <div class="card"><b>待审任务（{n_pending}）</b>{pending_html}</div>
 <div class="card"><b>接入向导</b><br>
 <code>MCP: http://127.0.0.1:7419/mcp</code><br>
-<code>Authorization: Bearer {token}</code><br>
+<code>令牌请在本地 token.txt 查看（控制台不展示完整凭据）</code><br>
 <span class="ok">代理不接触私钥；所有动作经策略判定并写审计。</span></div>
 <div class="card"><b>最近审计（20 条）</b>
 <table><tr><th>ts</th><th>来源</th><th>动作</th><th>判定</th><th>目标</th></tr>{rows}</table>
@@ -298,7 +318,7 @@ async function decide(id, approve) {{
 }}
 </script>
 </body></html>"#,
-        token = st.token, s = s, rows = rows, pending_html = pending_html, n_pending = pending.len()
+        s = s, rows = rows, pending_html = pending_html, n_pending = pending.len()
     );
     Html(html)
 }
@@ -375,7 +395,9 @@ async fn onboard_config(State(st): State<AppState>, uri: axum::http::Uri) -> Res
         .map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let client = params.get("client").map(|s| s.as_str()).unwrap_or("workbuddy");
     let endpoint = format!("http://127.0.0.1:7419/mcp");
-    let auth = format!("Bearer {}", st.token.as_str());
+    // 安全：HTTP 响应绝不回吐完整主令牌。片段用占位符；
+    // 真实令牌由 /onboard/write 在服务端本地代写，或用户从 token.txt 手动替换。
+    let auth = "Bearer ${DOU_TOKEN}".to_string();
     let (format, top_key, snippet) = match client {
         "codex" => (
             "toml",
@@ -560,18 +582,15 @@ async fn approve_task(State(st): State<AppState>, body: String) -> Response {
 }
 
 
-async fn handle_mcp(State(st): State<AppState>, headers: HeaderMap, body: String) -> Response {
-    let bearer = headers.get("authorization").and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.trim().to_string());
-    // 设备令牌：校验哈希/过期/吊销并取出作用域；dev 兜底令牌则无作用域约束。
-    let cred = bearer.as_deref().and_then(scope::verify_token);
-    if cred.is_none() && !auth::check(&headers, &st.token) {
-        audit::write(
-            &st.audit,
-            audit::event("agent", "auth", "-", "denied", json!({ "reason": "bad token" })),
-        );
-        return rpc::http_err(StatusCode::UNAUTHORIZED, -32001, "invalid or missing bearer token");
-    }
+/// 鉴权已由 `authz::require_auth` 中间件统一完成（W-15）。
+/// 本 handler 不再解析 Bearer，只从 Extension 取认证结果，
+/// 保证全仓唯一令牌解析点。
+async fn handle_mcp(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<authz::AuthContext>,
+    body: String,
+) -> Response {
+    let cred = ctx.cred.clone();
     let cred_ref = cred.as_ref();
 
     let req: Value = match serde_json::from_str(&body) {

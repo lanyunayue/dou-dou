@@ -159,14 +159,21 @@ pub fn query(path: &Path, since_ms: Option<u64>, source: Option<&str>, limit: us
         .collect()
 }
 
-/// SQLite 路径：和 JSONL 同目录
+/// SQLite 路径：统一走 W-11 的 DbPool 归口，支持 DOU_DB_PATH 覆盖。
 pub fn sqlite_path() -> std::path::PathBuf {
-    super::auth::data_dir().join("audit.db")
+    crate::state::db_path()
+}
+
+/// 审计条目数。空库时 `verify_chain` 会返回 `(true, 0)`，
+/// 必须配合本函数区分「空链未验证」与「链已校验通过」，避免 M2 出口假通过。
+pub fn entry_count(path: &Path) -> usize {
+    let Ok(text) = std::fs::read_to_string(path) else { return 0 };
+    text.lines().filter(|l| !l.trim().is_empty()).count()
 }
 
 /// 初始化 SQLite 表（只建一次）
 pub fn init_sqlite() {
-    let Ok(conn) = rusqlite::Connection::open(sqlite_path()) else { return };
+    let Ok(conn) = crate::state::open_conn() else { return };
     let _ = conn.execute(
         "CREATE TABLE IF NOT EXISTS audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -186,7 +193,7 @@ pub fn init_sqlite() {
 
 /// 写 SQLite（和 JSONL 并行）
 pub fn write_sqlite(entry: &Value) {
-    let Ok(conn) = rusqlite::Connection::open(sqlite_path()) else { return };
+    let Ok(conn) = crate::state::open_conn() else { return };
     let _ = conn.execute(
         "INSERT INTO audit (ts_ms, trace_id, source, action, target, verdict, detail, prev_hash, hash)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",

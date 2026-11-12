@@ -1,11 +1,13 @@
-//! 任务与审批闭环。
+//! 任务与审批闭环（W-11 状态写穿）。
 //!
 //! 计划书 4.9：变更类命令不直接执行，而是挂起成 task，等人工批准/拒绝。
-//! 长命令（>30s）也转任务句柄，避免客户端放弃后重跑。
+//! 本轮升级：每次状态变更**先落库再更新内存**，进程重启后从 `task_state` 恢复，
+//! 待审任务不再因重启丢失。`sessions` 因含 `russh::client::Handle`
+//! 仍只作运行时句柄缓存，重启需重连（见 `state.rs`）。
 
+use crate::state;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,6 +31,17 @@ impl TaskStatus {
             TaskStatus::Failed => "failed",
         }
     }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "approved" => TaskStatus::Approved,
+            "rejected" => TaskStatus::Rejected,
+            "running" => TaskStatus::Running,
+            "done" => TaskStatus::Done,
+            "failed" => TaskStatus::Failed,
+            _ => TaskStatus::PendingApproval,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -39,9 +52,7 @@ pub struct Task {
     pub status: TaskStatus,
     pub reason: String,
     pub approver_note: String,
-    /// 本次任务内记住该命令免审（仅执行档可记）。
     pub remember: bool,
-    /// 审批策略档位：observe | execute | change；change 档不可记住放行。
     pub policy: String,
     pub stdout: String,
     pub stderr: String,
@@ -56,17 +67,79 @@ pub struct TaskHub {
 }
 
 fn now_ms() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
+    state::now_ms() as u128
 }
 
 fn new_id() -> String {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    format!("task_{:x}", n)
+    format!("task_{}", crate::auth::rand_hex(12))
+}
+
+/// 写穿：状态变更先落库（失败不阻断内存流程，下次变更会重试）。
+fn persist(t: &Task) {
+    let Ok(conn) = state::open_conn() else { return };
+    let _ = conn.execute(
+        "INSERT INTO task_state
+            (id, session, command, status, reason, approver_note, remember, policy,
+             stdout, stderr, exit_code, created_ms, decided_ms, done_ms)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+         ON CONFLICT(id) DO UPDATE SET
+            status=excluded.status, reason=excluded.reason,
+            approver_note=excluded.approver_note, remember=excluded.remember,
+            policy=excluded.policy, stdout=excluded.stdout, stderr=excluded.stderr,
+            exit_code=excluded.exit_code, decided_ms=excluded.decided_ms,
+            done_ms=excluded.done_ms",
+        rusqlite::params![
+            t.id, t.session, t.command, t.status.as_str(), t.reason,
+            t.approver_note, t.remember as i64, t.policy,
+            t.stdout, t.stderr, t.exit_code,
+            t.created_ms as i64,
+            t.decided_ms.map(|v| v as i64),
+            t.done_ms.map(|v| v as i64),
+        ],
+    );
+}
+
+/// 重启恢复：从状态库读回全部任务。
+fn load_all() -> Vec<Task> {
+    let Ok(conn) = state::open_conn() else { return vec![] };
+    let mut stmt = match conn.prepare(
+        "SELECT id, session, command, status, reason, approver_note, remember, policy,
+                stdout, stderr, exit_code, created_ms, decided_ms, done_ms
+           FROM task_state ORDER BY created_ms",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    let rows = stmt.query_map([], |r| {
+        Ok(Task {
+            id: r.get(0)?,
+            session: r.get(1)?,
+            command: r.get(2)?,
+            status: TaskStatus::from_str(&r.get::<_, String>(3)?),
+            reason: r.get(4)?,
+            approver_note: r.get(5)?,
+            remember: r.get::<_, i64>(6)? != 0,
+            policy: r.get(7)?,
+            stdout: r.get(8)?,
+            stderr: r.get(9)?,
+            exit_code: r.get(10)?,
+            created_ms: r.get::<_, i64>(11)? as u128,
+            decided_ms: r.get::<_, Option<i64>>(12)?.map(|v| v as u128),
+            done_ms: r.get::<_, Option<i64>>(13)?.map(|v| v as u128),
+        })
+    });
+    match rows {
+        Ok(it) => it.filter_map(|r| r.ok()).collect(),
+        Err(_) => vec![],
+    }
 }
 
 impl TaskHub {
+    /// 启动时从库恢复；表不存在时返回空集（由 state::init_state_schema 建表）。
     pub fn new() -> Self {
-        Self { tasks: Arc::new(Mutex::new(Vec::new())) }
+        Self {
+            tasks: Arc::new(Mutex::new(load_all())),
+        }
     }
 
     pub async fn create_pending(&self, session: &str, command: &str, reason: &str, policy: &str) -> String {
@@ -87,6 +160,7 @@ impl TaskHub {
             decided_ms: None,
             done_ms: None,
         };
+        persist(&task);
         self.tasks.lock().await.push(task);
         id
     }
@@ -104,24 +178,28 @@ impl TaskHub {
         tasks[pos].approver_note = note.to_string();
         tasks[pos].remember = remember;
         tasks[pos].decided_ms = Some(now_ms());
-        Ok(Some(tasks[pos].clone()))
+        let snapshot = tasks[pos].clone();
+        persist(&snapshot);
+        Ok(Some(snapshot))
     }
 
     pub async fn mark_running(&self, id: &str) {
         let mut tasks = self.tasks.lock().await;
         if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
             t.status = TaskStatus::Running;
+            persist(t);
         }
     }
 
     pub async fn finish(&self, id: &str, stdout: String, stderr: String, code: i32) {
         let mut tasks = self.tasks.lock().await;
         if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
-            t.status = TaskStatus::Done;
+            t.status = if code == 0 { TaskStatus::Done } else { TaskStatus::Failed };
             t.stdout = stdout;
             t.stderr = stderr;
             t.exit_code = Some(code);
             t.done_ms = Some(now_ms());
+            persist(t);
         }
     }
 
@@ -155,4 +233,32 @@ pub fn task_to_json(t: &Task) -> Value {
         "stdout": t.stdout,
         "stderr": t.stderr,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_roundtrip() {
+        let all = vec![
+            TaskStatus::PendingApproval,
+            TaskStatus::Approved,
+            TaskStatus::Rejected,
+            TaskStatus::Running,
+            TaskStatus::Done,
+            TaskStatus::Failed,
+        ];
+        for s in all {
+            assert_eq!(TaskStatus::from_str(s.as_str()), s);
+        }
+    }
+
+    #[test]
+    fn ids_are_csprng_based_and_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..500 {
+            assert!(seen.insert(new_id()));
+        }
+    }
 }

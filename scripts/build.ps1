@@ -1,7 +1,13 @@
-# 用 MinGW 工具链构建。dlltool 必须能通过 PATH 找到，否则 windows-sys 编译失败。
-# 用法：  .\scripts\build.ps1 build        # 调试构建
-#         .\scripts\build.ps1 build --release
-#         .\scripts\build.ps1 run
+# Build helper for the MinGW toolchain.
+# Pure ASCII on purpose: Windows PowerShell 5.1 reads BOM-less UTF-8 as ANSI.
+# Usage:
+#   .\scripts\build.ps1 build
+#   .\scripts\build.ps1 build --release
+#   .\scripts\build.ps1 -Toolchain stable-x86_64-pc-windows-msvc test
+
+param(
+    [string]$Toolchain = "stable-x86_64-pc-windows-gnu"
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -24,8 +30,18 @@ $env:Path = "$bin;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $repo
 
+# ASCII-only target dir: a non-ASCII repo path breaks MinGW dlltool.
+if (-not $env:DOU_TARGET_DIR) { $env:DOU_TARGET_DIR = "E:/dou-target" }
+$env:CARGO_TARGET_DIR = $env:DOU_TARGET_DIR
+if (-not $env:CARGO_NET_OFFLINE) { $env:CARGO_NET_OFFLINE = "true" }
+
+# UTF-8 console so Chinese audit text is not garbled by the OEM code page.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
+Write-Output "[build] toolchain = $Toolchain"
 Write-Output "[build] mingw = $bin"
-Write-Output "[build] target-dir = E:/dou-target（规避中文路径）"
+Write-Output "[build] target-dir = $env:CARGO_TARGET_DIR"
 
 $cmd = if ($args.Count -gt 0) { $args[0] } else { "build" }
 $rest = if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() }
@@ -37,5 +53,5 @@ Get-Process -Name "dou-gateway" -ErrorAction SilentlyContinue | ForEach-Object {
     Start-Sleep -Milliseconds 500
 }
 
-& cargo $cmd @rest
+& cargo "+$Toolchain" $cmd @rest
 exit $LASTEXITCODE

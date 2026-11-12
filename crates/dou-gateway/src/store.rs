@@ -5,26 +5,15 @@
 //! 凭据只存密文与盐，不存明文；令牌与私钥明文只在签发/使用时短暂出现。
 
 use rusqlite::{params, Connection};
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn db_path() -> PathBuf {
-    std::env::var("LOCALAPPDATA")
-        .map(|p| PathBuf::from(p).join("dou").join("audit.db"))
-        .unwrap_or_else(|_| PathBuf::from("audit.db"))
-}
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::state::now_ms()
 }
 
-/// 打开连接（每次调用独立连接，SQLite 单文件并发由 WAL 与短事务保证）。
+/// 打开连接：统一走 W-11 的 DbPool 归口。
+/// 全仓唯一的 `Connection::open` 点在 `state.rs::open_conn()`。
 pub fn open() -> Result<Connection, String> {
-    let conn = Connection::open(db_path()).map_err(|e| format!("打开库: {e}"))?;
-    Ok(conn)
+    crate::state::open_conn()
 }
 
 /// 建表（幂等）。
