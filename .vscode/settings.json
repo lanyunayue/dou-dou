@@ -1,0 +1,40 @@
+{
+  // 豆 Dou · Tauri 2 (Rust) + Vue 3 工作区设置
+  // 工具链由 ../rust-toolchain.toml 固定为 stable-x86_64-pc-windows-msvc
+  "rust-analyzer.linkedProjects": ["./src-tauri/Cargo.toml"],
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.extraArgs": ["--offline"],
+  "rust-analyzer.cargo.extraEnv": {
+    "CARGO_NET_OFFLINE": "true"
+  },
+  "rust-analyzer.server.extraEnv": {
+    "CARGO_NET_OFFLINE": "true"
+  },
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "Vue.volar"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "Vue.volar"
+  },
+  "files.eol": "\n",
+  "files.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/dist": true
+  },
+  "search.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/Cargo.lock": true
+  },
+  "terminal.integrated.env.windows": {
+    "CARGO_NET_OFFLINE": "true"
+  },
+  "typescript.tsdk": "node_modules/typescript/lib"
+}

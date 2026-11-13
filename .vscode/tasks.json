@@ -1,0 +1,62 @@
+{
+  // 常用命令：Ctrl+Shift+B = 构建，F1 → Tasks: Run Task 选其它
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cargo check (Rust 后端)",
+      "type": "shell",
+      "command": "cargo check --offline",
+      "options": { "cwd": "${workspaceFolder}/src-tauri" },
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "cargo build (Rust 后端)",
+      "type": "shell",
+      "command": "cargo build --offline",
+      "options": { "cwd": "${workspaceFolder}/src-tauri" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "cargo test (Rust 后端)",
+      "type": "shell",
+      "command": "cargo test --offline",
+      "options": { "cwd": "${workspaceFolder}/src-tauri" },
+      "group": "test",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "npm build (Vue 前端)",
+      "type": "shell",
+      "command": "npm run build",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "tauri dev (整应用热重载)",
+      "type": "shell",
+      "command": "npm run tauri dev",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "tauri build (发布包)",
+      "type": "shell",
+      "command": "npm run tauri build",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "SSH 回环自校验 (10 项)",
+      "type": "shell",
+      "command": "cargo run --offline --bin dou-ssh-selfcheck",
+      "options": { "cwd": "E:/思考/dou/tools/ssh-loopback" },
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

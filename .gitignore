@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# ---- W-03 git 化：敏感与运行时产物，禁止入库 ----
+# 凭据 / 令牌（风控红线：一旦入库即视为泄露）
+token.txt
+*.token
+audit.db
+known_hosts.json
+vault.json
+quarantine/
+# 私钥与证书
+*.key
+*.pem
+id_rsa
+id_ed25519
+id_ecdsa
+# 本机构建产物在仓库外（E:/dou-target），此处双保险
+dou-target/
+target/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+# 接手环境配置需随仓库走，否则协作方/新机器拿不到任务与调试配置
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
