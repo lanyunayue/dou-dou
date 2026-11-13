@@ -37,6 +37,8 @@ sha2 = "0.10"
 ring = "0.17"
 aes-gcm = "0.11"
 base64 = "0.22"
+# 明文私钥用完即清（Zeroizing 在 drop 时自动擦除内存）。已在 Cargo.lock 中（ssh-key 的传递依赖），离线可构建。
+zeroize = "1.9"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

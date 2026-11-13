@@ -5,11 +5,6 @@ use tauri::AppHandle;
 
 use crate::ssh;
 
-#[derive(Default)]
-pub struct SftpState {
-    pub connected: bool,
-}
-
 #[derive(Serialize)]
 pub struct SftpEntry {
     pub name: String,
@@ -26,10 +21,16 @@ pub async fn sftp_list(
     key_path: &str,
     path: &str,
 ) -> Result<Vec<SftpEntry>, String> {
-    let mut session = ssh::ssh_connect(app, host, port, user, key_path).await?;
+    let session = ssh::ssh_connect(app, host, port, user, key_path).await?;
 
-    let mut channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
-    channel.exec(true, format!("ls -1p {path}")).await.map_err(|e| e.to_string())?;
+    let mut channel = session
+        .channel_open_session()
+        .await
+        .map_err(|e| e.to_string())?;
+    channel
+        .exec(true, format!("ls -1p {path}"))
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut out = Vec::new();
     while let Some(msg) = channel.wait().await {
@@ -38,9 +39,15 @@ pub async fn sftp_list(
                 let s = String::from_utf8_lossy(&data);
                 for line in s.lines() {
                     let name = line.trim_end_matches('/').to_string();
-                    if name.is_empty() { continue; }
+                    if name.is_empty() {
+                        continue;
+                    }
                     let is_dir = line.ends_with('/');
-                    out.push(SftpEntry { name, is_dir, size: 0 });
+                    out.push(SftpEntry {
+                        name,
+                        is_dir,
+                        size: 0,
+                    });
                 }
             }
             russh::ChannelMsg::Eof | russh::ChannelMsg::ExitStatus { .. } => break,

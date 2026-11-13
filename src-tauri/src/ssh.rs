@@ -7,8 +7,8 @@
 //!   - 密钥轮换后可用 `host_key_forget` 清除旧记录重新确认。
 
 use russh::client;
-use russh::keys::ssh_key::{HashAlg, PublicKey};
 use russh::keys::PublicKeyOrCertificate;
+use russh::keys::ssh_key::{HashAlg, PublicKey};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -84,7 +84,10 @@ fn store_lock() -> &'static Mutex<()> {
 pub fn verify_or_learn(host: &str, port: u16, fp: &str) -> HostKeyVerdict {
     let _g = store_lock().lock().unwrap_or_else(|e| e.into_inner());
     let mut entries = load_known_hosts();
-    if let Some(e) = entries.iter_mut().find(|e| e.host == host && e.port == port) {
+    if let Some(e) = entries
+        .iter_mut()
+        .find(|e| e.host == host && e.port == port)
+    {
         if e.fingerprint == fp {
             e.last_seen = now_epoch();
             let _ = save_known_hosts(&entries);
@@ -132,7 +135,10 @@ pub struct SshHandler {
 impl client::Handler for SshHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        key: &PublicKeyOrCertificate,
+    ) -> Result<bool, Self::Error> {
         let fp = host_key_fingerprint(key);
         match verify_or_learn(&self.host, self.port, &fp) {
             HostKeyVerdict::KnownMatch => Ok(true),
@@ -167,6 +173,8 @@ impl client::Handler for SshHandler {
 pub type DouHandle = russh::client::Handle<SshHandler>;
 
 /// 统一连接入口：主机密钥校验（connect 期间）+ 公钥认证，返回已认证的会话。
+///
+/// 私钥从磁盘读取。凭据保险库走的是 [`ssh_connect_with_key`]：私钥只存在于内存。
 pub async fn ssh_connect(
     app: AppHandle,
     host: &str,
@@ -174,6 +182,47 @@ pub async fn ssh_connect(
     user: &str,
     key_path: &str,
 ) -> Result<DouHandle, String> {
+    let key = russh::keys::PrivateKey::read_openssh_file(std::path::Path::new(key_path))
+        .map_err(|e| format!("读私钥: {e}"))?;
+    // 与既有语义保持一致：认证结果不在此处判定，由后续 channel 操作暴露。
+    let (session, _auth_ok) = ssh_connect_inner(app, host, port, user, key).await?;
+    Ok(session)
+}
+
+/// 统一连接入口（内存私钥）：主机密钥校验（connect 期间）+ 公钥认证。
+///
+/// 凭据保险库把解密出的私钥直接以内存形式交给本函数，**从不落盘**。
+/// `PrivateKey` 随会话释放被 `ssh-key` 自动清零（其 `Drop` 实现里做 zeroize）。
+///
+/// 与 [`ssh_connect`] 不同：本函数会检查认证结果，服务器拒绝该公钥时直接报错，
+/// 避免把「未认证的会话」当成连接成功。
+pub async fn ssh_connect_with_key(
+    app: AppHandle,
+    host: &str,
+    port: u16,
+    user: &str,
+    key: russh::keys::PrivateKey,
+) -> Result<DouHandle, String> {
+    let (session, auth_ok) = ssh_connect_inner(app, host, port, user, key).await?;
+    if !auth_ok {
+        return Err(format!(
+            "认证失败：服务器拒绝了 {user}@{host}:{port} 的公钥"
+        ));
+    }
+    Ok(session)
+}
+
+/// 连接 + 公钥认证的公共实现。
+///
+/// 返回 `(会话, 认证是否成功)`：注意 `authenticate_publickey` 在服务器拒绝公钥时
+/// 返回的是 `Ok(AuthResult::Failure)` 而不是 `Err`，必须显式判定。
+async fn ssh_connect_inner(
+    app: AppHandle,
+    host: &str,
+    port: u16,
+    user: &str,
+    key: russh::keys::PrivateKey,
+) -> Result<(DouHandle, bool), String> {
     let config = std::sync::Arc::new(client::Config::default());
     let mut session = client::connect(
         config,
@@ -194,16 +243,14 @@ pub async fn ssh_connect(
         }
     })?;
 
-    let key = russh::keys::PrivateKey::read_openssh_file(std::path::Path::new(key_path))
-        .map_err(|e| format!("读私钥: {e}"))?;
-    session
+    let auth = session
         .authenticate_publickey(
             user,
             russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), None),
         )
         .await
         .map_err(|e| format!("认证失败: {e}"))?;
-    Ok(session)
+    Ok((session, auth.success()))
 }
 
 /// 从 `DOU_SSH`（`user@host:port`）与 `DOU_SSH_KEY` 解析本应用统一靶机目标。

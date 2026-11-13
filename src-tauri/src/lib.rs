@@ -5,8 +5,8 @@ mod transfer;
 mod transfer_queue;
 mod vault;
 
-use serde::Serialize;
 use pty::PtyState;
+use serde::Serialize;
 use std::sync::Arc;
 use transfer_queue::TransferQueue;
 use vault::VaultState;
@@ -28,10 +28,7 @@ fn ssh_target_up() -> bool {
 #[tauri::command]
 fn gateway_status() -> GatewayStatus {
     let endpoint = "http://127.0.0.1:7419/health".to_string();
-    let running = match reqwest::blocking::get(&endpoint) {
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let running = reqwest::blocking::get(&endpoint).is_ok();
     GatewayStatus {
         running,
         endpoint,
@@ -117,11 +114,7 @@ async fn pty_write(
     sid: String,
     data: String,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    let s = sessions
-        .get(&sid)
-        .ok_or_else(|| format!("session {sid} 不存在"))?;
-    s.tx.send(data.to_string()).map_err(|e| e.to_string())
+    pty::pty_write(&state, &sid, &data).await
 }
 
 #[tauri::command]
@@ -149,36 +142,6 @@ async fn sftp_download(
 }
 
 #[tauri::command]
-async fn sftp_upload(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    local: String,
-    remote: String,
-) -> Result<(), String> {
-    transfer::upload(app, &host, port, &user, &key_path, &local, &remote).await
-}
-
-#[tauri::command]
-fn sanitize_ansi(s: String) -> String {
-    transfer::sanitize_ansi(&s)
-}
-
-#[tauri::command]
-async fn download_chunked(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    remote: String,
-) -> Result<String, String> {
-    transfer::download_chunked(app, &host, port, &user, &key_path, &remote).await
-}
-
-#[tauri::command]
 async fn remote_stat(
     app: tauri::AppHandle,
     host: String,
@@ -188,49 +151,6 @@ async fn remote_stat(
     remote: String,
 ) -> Result<(u64, i64), String> {
     transfer::remote_stat(app, &host, port, &user, &key_path, &remote).await
-}
-
-#[tauri::command]
-async fn download_dir(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    remote: String,
-) -> Result<String, String> {
-    transfer::download_dir(app, &host, port, &user, &key_path, &remote).await
-}
-
-#[tauri::command]
-async fn upload_dir(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    local: String,
-    remote: String,
-) -> Result<(), String> {
-    transfer::upload_dir(app, &host, port, &user, &key_path, &local, &remote).await
-}
-
-#[tauri::command]
-async fn download_resume(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    remote: String,
-    offset: u64,
-) -> Result<(String, u64, bool), String> {
-    transfer::download_resume(app, &host, port, &user, &key_path, &remote, offset).await
-}
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("你好，{}！豆 Dou 桌面壳已就绪。", name)
 }
 
 // ------------------------- 主机密钥（安全底座） -------------------------
@@ -256,7 +176,9 @@ async fn tq_enqueue(
     remote: String,
     local: String,
 ) -> Result<String, String> {
-    Ok(transfer_queue::enqueue(&state, app, &kind, &label, &remote, &local))
+    Ok(transfer_queue::enqueue(
+        &state, app, &kind, &label, &remote, &local,
+    ))
 }
 
 #[tauri::command]
@@ -323,7 +245,9 @@ fn vault_status(state: tauri::State<'_, VaultState>) -> bool {
     vault::vault_status(state)
 }
 #[tauri::command]
-fn vault_list_targets(state: tauri::State<'_, VaultState>) -> Result<Vec<vault::VaultTarget>, String> {
+fn vault_list_targets(
+    state: tauri::State<'_, VaultState>,
+) -> Result<Vec<vault::VaultTarget>, String> {
     vault::vault_list_targets(state)
 }
 #[tauri::command]
@@ -338,8 +262,20 @@ fn vault_add_target(
     vault::vault_add_target(state, name, host, port, user, key_path)
 }
 #[tauri::command]
-fn vault_get_key(state: tauri::State<'_, VaultState>, name: String) -> Result<String, String> {
+fn vault_get_key(
+    state: tauri::State<'_, VaultState>,
+    name: String,
+) -> Result<vault::VaultKeyInfo, String> {
     vault::vault_get_key(state, name)
+}
+/// 用保险库里的私钥在内存中完成一次 SSH 认证（解密 → 连接 → 用完即清，不落盘）。
+#[tauri::command]
+async fn vault_test_connect(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, VaultState>,
+    name: String,
+) -> Result<String, String> {
+    vault::vault_test_connect(app, state, name).await
 }
 #[tauri::command]
 fn vault_remove_target(state: tauri::State<'_, VaultState>, name: String) -> Result<(), String> {
@@ -357,7 +293,10 @@ fn ensure_gateway_started() {
         if std::path::Path::new(exe).exists() {
             let _ = std::process::Command::new(exe)
                 .env("DOU_SSH", "dou@127.0.0.1:22")
-                .env("DOU_SSH_KEY", r"C:\Users\mrhua\AppData\Local\dou\keys\id_ed25519")
+                .env(
+                    "DOU_SSH_KEY",
+                    r"C:\Users\mrhua\AppData\Local\dou\keys\id_ed25519",
+                )
                 .spawn();
         }
     });
@@ -365,6 +304,9 @@ fn ensure_gateway_started() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 启动时清理旧版本遗留在 keys/ 下的明文私钥（修复存量泄露）。
+    // 只清理该目录下的明文私钥，且保留当前生效的 SSH 私钥路径。
+    let _ = vault::cleanup_legacy_keys(&vault::keys_dir());
     ensure_gateway_started();
     std::thread::sleep(std::time::Duration::from_millis(800));
     tauri::Builder::default()
@@ -382,12 +324,33 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet, gateway_status, gateway_token, gateway_request, open_pty, pty_write, sftp_list,
-            sftp_download, sftp_upload, sanitize_ansi, download_chunked, remote_stat, download_dir,
-            upload_dir, download_resume, host_key_list, host_key_forget, tq_enqueue, tq_list,
-            tq_cancel, tq_pause, tq_resume, tq_clear, sync_folders, vault_init, vault_unlock,
-            vault_lock, vault_status, vault_list_targets, vault_add_target, vault_get_key,
-            vault_remove_target, vault_notify
+            gateway_status,
+            gateway_token,
+            gateway_request,
+            open_pty,
+            pty_write,
+            sftp_list,
+            sftp_download,
+            remote_stat,
+            host_key_list,
+            host_key_forget,
+            tq_enqueue,
+            tq_list,
+            tq_cancel,
+            tq_pause,
+            tq_resume,
+            tq_clear,
+            sync_folders,
+            vault_init,
+            vault_unlock,
+            vault_lock,
+            vault_status,
+            vault_list_targets,
+            vault_add_target,
+            vault_get_key,
+            vault_test_connect,
+            vault_remove_target,
+            vault_notify
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
