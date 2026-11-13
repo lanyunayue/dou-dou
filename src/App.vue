@@ -320,12 +320,6 @@ interface GwErrorInfo {
   message: string
   retryable: boolean
 }
-
-/** 保险库中某个目标私钥的**非敏感**信息（私钥明文不出后端、不落盘）。 */
-interface VaultKeyInfo {
-  algorithm: string
-  fingerprint: string
-}
 const gwError = ref<GwErrorInfo | null>(null)
 function dismissGwError() { gwError.value = null }
 function markGwFailure(message: string) {
@@ -467,6 +461,11 @@ async function doSync() {
 }
 
 // ---------- 凭据保险库 ----------
+/** 保险库中某个目标私钥的**非敏感**信息（私钥明文不出后端、不落盘）。 */
+interface VaultKeyInfo {
+  algorithm: string
+  fingerprint: string
+}
 const vaultUnlocked = ref(false)
 const vaultTargets = ref<any[]>([])
 const masterPw = ref('')
