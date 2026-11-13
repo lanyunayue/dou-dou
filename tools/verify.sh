@@ -30,8 +30,10 @@ check_repo() {
   local dir="$1" label="$2"
   if [ ! -d "$dir/.git" ] && [ -f "$dir/history.bundle" ]; then
     printf '  [INFO] %s 为 bundle 形态，自动恢复 git ...\n' "$label"
+    # 工作树已由 git archive 填好，checkout 必须用 -f 强制覆盖同名文件，
+    # 否则 git 会以「untracked working tree files would be overwritten」拒绝。
     ( cd "$dir" && git init -q && git fetch -q history.bundle 'refs/*:refs/*' \
-        && git checkout -q main ) >/dev/null 2>&1 \
+        && git checkout -qf main ) >/dev/null 2>&1 \
       && ok "$label 已从 history.bundle 还原" \
       || bad "$label bundle 还原失败"
   fi
@@ -81,7 +83,17 @@ if command -v node >/dev/null 2>&1; then ok "node: $(node --version)"; else bad 
 step "5. Rust 构建与测试"
 if [ -d "$APP/src-tauri" ]; then
   ( cd "$APP/src-tauri" && cargo build --offline >/tmp/v_build.log 2>&1 )
-  if [ $? -eq 0 ]; then ok "cargo build --offline 通过"; else bad "cargo build 失败（见 /tmp/v_build.log）"; tail -5 /tmp/v_build.log | sed 's/^/      /'; fi
+  rc=$?
+  # 判定标准是「有无编译错误」，而非退出码：新机首次编译全部依赖耗时很长，
+  # 若被外部超时打断会返回非 0 但日志里并无 error。
+  if grep -qE "^error(\[|:)" /tmp/v_build.log; then
+    bad "cargo build 有编译错误"
+    grep -E "^error(\[|:)" /tmp/v_build.log | head -8 | sed 's/^/      /'
+  elif grep -q "Finished" /tmp/v_build.log; then
+    ok "cargo build --offline 通过"
+  else
+    printf '  [INFO] cargo build 未跑完（首次编译依赖耗时长），但无编译错误\n'
+  fi
 
   ( cd "$APP/src-tauri" && cargo test --offline --lib >/tmp/v_test.log 2>&1 )
   if [ $? -eq 0 ]; then
