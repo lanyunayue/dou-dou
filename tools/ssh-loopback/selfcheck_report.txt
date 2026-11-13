@@ -1,0 +1,13 @@
+==== 受治理远程操作主线 · 端到端自校验汇总 ====
+✓ PASS A1 主机密钥首次连接(TOFU FirstSeen): FirstSeen("SHA256:yXmL7em4KdKCjiaGpM5FeRUtNSGB3E/4cIzk+OGYRwA")
+✓ PASS B1 重复连接(KnownMatch)+公钥认证: KnownMatch
+✓ PASS B2 获取已认证会话(复用): 
+✓ PASS C1 上传(分块 cat > + 内容一致): written=204800 expected=204800
+✓ PASS C2 断点续传(远端截断→cat >> 补齐): before=65536 after=204800 rewritten=204800
+✓ PASS D1 下载(dd 分块 + 内容一致): written=204800 chunks>1 验证分块逻辑
+✓ PASS E1 同步push(上传目录树): remote files = ["a.txt", "sub/b.txt"]
+✓ PASS E2 同步push(删远端多余文件): remote files = ["sub/b.txt"]
+✓ PASS E3 同步pull(下载树+新增+不拉已删): 
+✓ PASS F1 主机密钥变更拒绝(Mismatch→连接失败): connected_ok=false verdict=Mismatch { expected: "SHA256:yXmL7em4KdKCjiaGpM5FeRUtNSGB3E/4cIzk+OGYRwA", got: "SHA256:YgsTtxPUtcHkMpqnjOJmu0AA6zgLAt3lfsJF43owd5M" }
+
+总计 10 项，通过 10，失败 0

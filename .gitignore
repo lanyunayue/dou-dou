@@ -41,3 +41,6 @@ desktop.ini
 *.tmp
 *.swp
 ~$*
+
+# 脚本临时输出目录
+tools/.contract/
