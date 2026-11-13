@@ -223,7 +223,7 @@
           <input v-model="masterPw" type="password" class="filter" placeholder="主密码" />
           <button class="btn" @click="vaultInit">初始化</button>
           <button class="btn ok" @click="vaultUnlock">解锁</button>
-          <span class="hint">首次需初始化；之后用主密码解锁。锁定时仅清除内存密钥，不删磁盘文件。</span>
+          <span class="hint">首次需初始化；之后用主密码解锁。锁定时清除内存密钥；私钥明文不落盘，用后即清。</span>
         </div>
         <div v-else class="row">
           <span class="hint" style="color:#166534">已解锁</span>
@@ -242,7 +242,8 @@
           <div v-for="t in vaultTargets" :key="t.name" class="approve-card">
             <div class="mono">{{ t.name }} · {{ t.user }}@{{ t.host }}:{{ t.port }} {{ t.enc_key? '🔑 已加密':'—' }}</div>
             <div class="approve-actions">
-              <button class="btn ok" v-if="t.enc_key" @click="vaultGetKey(t.name)">取出密钥</button>
+              <button class="btn ok" v-if="t.enc_key" @click="vaultGetKey(t.name)">校验密钥</button>
+              <button class="btn" v-if="t.enc_key" @click="vaultTestConnect(t.name)">用密钥连接</button>
               <button class="btn bad" @click="vaultRemove(t.name)">删除</button>
             </div>
           </div>
@@ -318,6 +319,12 @@ interface GwErrorInfo {
   code: 'TOKEN_UNAVAILABLE' | 'AUTH_FAILED' | 'THROTTLED' | 'GATEWAY_OFFLINE'
   message: string
   retryable: boolean
+}
+
+/** 保险库中某个目标私钥的**非敏感**信息（私钥明文不出后端、不落盘）。 */
+interface VaultKeyInfo {
+  algorithm: string
+  fingerprint: string
 }
 const gwError = ref<GwErrorInfo | null>(null)
 function dismissGwError() { gwError.value = null }
@@ -472,7 +479,8 @@ async function vaultAdd() {
   try { await invoke('vault_add_target', { name: newName.value, host: newHost.value, port: Number(newPort.value), user: newUser.value, keyPath: newKey.value }); await vaultList(); alert('已加密入库') }
   catch (e: any) { alert('入库失败: ' + e) }
 }
-async function vaultGetKey(name: string) { try { const p = await invoke('vault_get_key', { name }); alert('密钥已落到: ' + p) } catch (e: any) { alert('取出失败: ' + e) } }
+async function vaultGetKey(name: string) { try { const info = await invoke<VaultKeyInfo>('vault_get_key', { name }); alert('私钥已在内存中解密校验：\n算法 ' + info.algorithm + '\n指纹 ' + info.fingerprint + '\n（明文未落盘，用完即清）') } catch (e: any) { alert('取出失败: ' + e) } }
+async function vaultTestConnect(name: string) { try { const msg = await invoke<string>('vault_test_connect', { name }); alert(msg) } catch (e: any) { alert('连接失败: ' + e) } }
 async function vaultRemove(name: string) { try { await invoke('vault_remove_target', { name }); await vaultList() } catch (e: any) { alert('删除失败: ' + e) } }
 
 // ---------- 主机密钥 ----------
