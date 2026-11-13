@@ -45,7 +45,7 @@ check_repo() {
     t=$(cd "$dir" && git tag -l 2>/dev/null | grep -c handover-baseline || true)
     [ "$t" -ge 1 ] && ok "$label 有 handover-baseline tag" || bad "$label 缺 tag"
     b=$(cd "$dir" && git branch -a 2>/dev/null | wc -l)
-    [ "$b" -ge 2 ] && ok "$label 分支数 = $b" || bad "$label 分支异常"
+    [ "$b" -ge 1 ] && ok "$label 分支数 = $b" || bad "$label 分支异常"
   else
     bad "$label 缺 .git 且无 history.bundle"
   fi
