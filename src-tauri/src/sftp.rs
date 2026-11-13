@@ -5,11 +5,6 @@ use tauri::AppHandle;
 
 use crate::ssh;
 
-#[derive(Default)]
-pub struct SftpState {
-    pub connected: bool,
-}
-
 #[derive(Serialize)]
 pub struct SftpEntry {
     pub name: String,

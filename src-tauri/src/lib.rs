@@ -149,36 +149,6 @@ async fn sftp_download(
 }
 
 #[tauri::command]
-async fn sftp_upload(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    local: String,
-    remote: String,
-) -> Result<(), String> {
-    transfer::upload(app, &host, port, &user, &key_path, &local, &remote).await
-}
-
-#[tauri::command]
-fn sanitize_ansi(s: String) -> String {
-    transfer::sanitize_ansi(&s)
-}
-
-#[tauri::command]
-async fn download_chunked(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    remote: String,
-) -> Result<String, String> {
-    transfer::download_chunked(app, &host, port, &user, &key_path, &remote).await
-}
-
-#[tauri::command]
 async fn remote_stat(
     app: tauri::AppHandle,
     host: String,
@@ -188,49 +158,6 @@ async fn remote_stat(
     remote: String,
 ) -> Result<(u64, i64), String> {
     transfer::remote_stat(app, &host, port, &user, &key_path, &remote).await
-}
-
-#[tauri::command]
-async fn download_dir(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    remote: String,
-) -> Result<String, String> {
-    transfer::download_dir(app, &host, port, &user, &key_path, &remote).await
-}
-
-#[tauri::command]
-async fn upload_dir(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    local: String,
-    remote: String,
-) -> Result<(), String> {
-    transfer::upload_dir(app, &host, port, &user, &key_path, &local, &remote).await
-}
-
-#[tauri::command]
-async fn download_resume(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    key_path: String,
-    remote: String,
-    offset: u64,
-) -> Result<(String, u64, bool), String> {
-    transfer::download_resume(app, &host, port, &user, &key_path, &remote, offset).await
-}
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("你好，{}！豆 Dou 桌面壳已就绪。", name)
 }
 
 // ------------------------- 主机密钥（安全底座） -------------------------
@@ -397,9 +324,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet, gateway_status, gateway_token, gateway_request, open_pty, pty_write, sftp_list,
-            sftp_download, sftp_upload, sanitize_ansi, download_chunked, remote_stat, download_dir,
-            upload_dir, download_resume, host_key_list, host_key_forget, tq_enqueue, tq_list,
+            gateway_status, gateway_token, gateway_request, open_pty, pty_write, sftp_list,
+            sftp_download, remote_stat, host_key_list, host_key_forget, tq_enqueue, tq_list,
             tq_cancel, tq_pause, tq_resume, tq_clear, sync_folders, vault_init, vault_unlock,
             vault_lock, vault_status, vault_list_targets, vault_add_target, vault_get_key,
             vault_test_connect, vault_remove_target, vault_notify
