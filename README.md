@@ -101,18 +101,39 @@ Visual Studio 2026 Community：「文件 → 打开 → 文件夹」选 `E:\dou-
 ## 七、接手体检结论（2026-11-13）
 
 完整报告见 `E:\思考\dou\docs\handover\05-接手体检报告.md`。**构建、类型检查、静态分析
-全部 0 error**，但查实以下问题，按此顺序处理：
+全部 0 error**。已处理与待处理如下：
 
-| 优先级 | 问题 | 位置 |
+| 优先级 | 问题 | 状态 |
 |---|---|---|
-| P0 | 保险库锁定态可绕过：`vault_list_targets` / `vault_remove_target` 未校验 unlocked | `src-tauri/src/vault.rs:167`、`:225` |
-| P0 | 明文私钥落盘后不回收（`vault_lock` 只清内存密钥） | `src-tauri/src/vault.rs:217-222` |
-| P1 | 保险库文件损坏被静默吞，误报「未初始化」 | `src-tauri/src/vault.rs:104-109` |
-| P1 | KDF 迭代 200k 偏低（OWASP 建议 ≥600k） | `src-tauri/src/vault.rs:26` |
-| P1 | 项目尚未 git 化（对应工单 W-03） | 仓库根 |
-| P2 | 前端 942 行单文件 `App.vue`，24 处 invoke | `src/App.vue` |
-| P2 | 5 个真死代码命令（已被 `tq_enqueue` 取代） | `src-tauri/src/lib.rs` |
-| P2 | clippy 26 warning / rustfmt 31 处差异 | 全局 |
+| P0 | 保险库锁定态可绕过：`vault_list_targets` / `vault_remove_target` 未校验 unlocked | ✅ **已修**（新增 `ensure_unlocked` 闸门 + 2 个回归测试） |
+| P0 | 明文私钥落盘后不回收（`vault_lock` 只清内存密钥） | ⬜ 待处理 |
+| P1 | 保险库文件损坏被静默吞，误报「未初始化」 | ⬜ 待处理 |
+| P1 | KDF 迭代 200k 偏低（OWASP 建议 ≥600k） | ⬜ 待处理 |
+| P1 | `.gitignore` 吞掉 VS Code 配置 | ✅ **已修** |
+| P1 | 项目尚未 git 化 | ✅ **已修**（commit `00b8171`，tag `handover-baseline`） |
+| P2 | 前端 942 行单文件 `App.vue`，24 处 invoke | ⬜ 待处理 |
+| P2 | 5 个真死代码命令（已被 `tq_enqueue` 取代） | ⬜ 待处理 |
+| P2 | clippy 26 warning / rustfmt 31 处差异 | ⬜ 待处理 |
+
+## 八、版本底子（git）
+
+仓库已初始化（分支 `main`），基线打 `handover-baseline` tag。
+
+```bash
+cd E:\dou-app
+git log --oneline          # 查看历史
+git status                 # 应始终干净
+git tag -l                 # handover-baseline
+git revert <commit>        # 单个提交可独立回滚（已实测）
+```
+
+- `.gitignore` 已排除全部敏感与产物：`token.txt` / `audit.db` / `known_hosts.json` /
+  `vault.json` / `quarantine/` / 各类私钥 / `node_modules` / `dist` / `target/`。
+- `.gitattributes` 统一仓库内换行为 LF（消除 Windows CRLF 噪音）。
+- `.vscode/{settings,tasks,launch}.json` 随仓库走，协作方开箱即用。
+
+⚠️ 提交前请确认没有 `git add -A` 误带敏感文件；架构师工单对首个 commit 有明确红线
+（不得含 `token.txt` / `audit.db`）。
 
 体检命令：
 
