@@ -106,9 +106,9 @@ Visual Studio 2026 Community：「文件 → 打开 → 文件夹」选 `E:\dou-
 | 优先级 | 问题 | 状态 |
 |---|---|---|
 | P0 | 保险库锁定态可绕过：`vault_list_targets` / `vault_remove_target` 未校验 unlocked | ✅ **已修**（新增 `ensure_unlocked` 闸门 + 2 个回归测试） |
-| P0 | 明文私钥落盘后不回收（`vault_lock` 只清内存密钥） | ⬜ 待处理 |
-| P1 | 保险库文件损坏被静默吞，误报「未初始化」 | ⬜ 待处理 |
-| P1 | KDF 迭代 200k 偏低（OWASP 建议 ≥600k） | ⬜ 待处理 |
+| P0 | 明文私钥落盘后不回收（`vault_lock` 只清内存密钥） | ✅ **已修**（私钥只在内存中短暂存在，用后即清；新增 `ssh_connect_with_key` 内存私钥入口 + `vault_test_connect`；启动/锁定时清理 `keys/` 遗留明文） |
+| P1 | 保险库文件损坏被静默吞，误报「未初始化」 | ✅ **已修**（`read_vault` 区分「不存在 / 损坏 / 正常」；损坏时 `vault_init` 拒绝覆盖原文件） |
+| P1 | KDF 迭代 200k 偏低（OWASP 建议 ≥600k） | ✅ **已修**（新建保险库写 600k；迭代次数存进 `vault.json`，老文件按 200k 兼容解锁） |
 | P1 | `.gitignore` 吞掉 VS Code 配置 | ✅ **已修** |
 | P1 | 项目尚未 git 化 | ✅ **已修**（commit `00b8171`，tag `handover-baseline`） |
 | P2 | 前端 942 行单文件 `App.vue`，24 处 invoke | ⬜ 待处理 |

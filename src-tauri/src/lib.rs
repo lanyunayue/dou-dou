@@ -338,8 +338,20 @@ fn vault_add_target(
     vault::vault_add_target(state, name, host, port, user, key_path)
 }
 #[tauri::command]
-fn vault_get_key(state: tauri::State<'_, VaultState>, name: String) -> Result<String, String> {
+fn vault_get_key(
+    state: tauri::State<'_, VaultState>,
+    name: String,
+) -> Result<vault::VaultKeyInfo, String> {
     vault::vault_get_key(state, name)
+}
+/// 用保险库里的私钥在内存中完成一次 SSH 认证（解密 → 连接 → 用完即清，不落盘）。
+#[tauri::command]
+async fn vault_test_connect(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, VaultState>,
+    name: String,
+) -> Result<String, String> {
+    vault::vault_test_connect(app, state, name).await
 }
 #[tauri::command]
 fn vault_remove_target(state: tauri::State<'_, VaultState>, name: String) -> Result<(), String> {
@@ -365,6 +377,9 @@ fn ensure_gateway_started() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 启动时清理旧版本遗留在 keys/ 下的明文私钥（修复存量泄露）。
+    // 只清理该目录下的明文私钥，且保留当前生效的 SSH 私钥路径。
+    let _ = vault::cleanup_legacy_keys(&vault::keys_dir());
     ensure_gateway_started();
     std::thread::sleep(std::time::Duration::from_millis(800));
     tauri::Builder::default()
@@ -387,7 +402,7 @@ pub fn run() {
             upload_dir, download_resume, host_key_list, host_key_forget, tq_enqueue, tq_list,
             tq_cancel, tq_pause, tq_resume, tq_clear, sync_folders, vault_init, vault_unlock,
             vault_lock, vault_status, vault_list_targets, vault_add_target, vault_get_key,
-            vault_remove_target, vault_notify
+            vault_test_connect, vault_remove_target, vault_notify
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
