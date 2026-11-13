@@ -1,5 +1,4 @@
 <template>
-  <!-- 优雅离线态：不黑屏 / 不纯白 / 不裸 os error / 不伪造连接成功 -->
   <div v-if="variant === 'files'" class="ssh-offline-files">
     <div class="ssh-title">⚠ 未连接靶机</div>
     <div class="hint">{{ sshError }}</div>

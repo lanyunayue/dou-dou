@@ -13,6 +13,7 @@
     </div>
     <div class="term-wrap">
       <div :ref="setTermEl" class="terminal"></div>
+      <!-- 优雅离线态：不黑屏 / 不纯白 / 不裸 os error / 不伪造连接成功 -->
       <OfflineState v-if="sshError" variant="terminal" />
     </div>
   </div>
