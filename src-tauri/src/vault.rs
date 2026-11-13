@@ -139,17 +139,22 @@ fn random_bytes(n: usize) -> Vec<u8> {
 fn aes_encrypt(key: &[u8], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| e.to_string())?;
     let nonce_bytes = random_bytes(12);
-    let nonce = AesNonce::from_slice(&nonce_bytes);
+    // 长度由 random_bytes(12) 保证为 12，不会失败。
+    let nonce = AesNonce::try_from(&nonce_bytes[..]).map_err(|e| e.to_string())?;
     let ct = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(&nonce, plaintext)
         .map_err(|e| e.to_string())?;
     Ok((ct, nonce_bytes))
 }
 
 fn aes_decrypt(key: &[u8], ciphertext: &[u8], nonce_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| e.to_string())?;
-    let nonce = AesNonce::from_slice(nonce_bytes);
-    cipher.decrypt(nonce, ciphertext).map_err(|e| e.to_string())
+    // nonce 来自磁盘文件，长度可能损坏；这里显式报错而不是 panic。
+    let nonce = AesNonce::try_from(nonce_bytes)
+        .map_err(|e| format!("nonce 长度非法（应为 12 字节）: {e}"))?;
+    cipher
+        .decrypt(&nonce, ciphertext)
+        .map_err(|e| e.to_string())
 }
 
 /// 读取保险库文件，区分「不存在」「损坏」「正常」。
@@ -660,7 +665,8 @@ mod tests {
         init_vault_at(&path, "new-master").unwrap();
         let vf = read_vault(&path).unwrap();
         assert_eq!(vf.iterations, ITERATIONS);
-        assert!(ITERATIONS >= 600_000, "必须达到 OWASP 建议的 600k");
+        // 常量断言：编译期即可校验迭代次数下限，不满足时直接编译失败。
+        const { assert!(ITERATIONS >= 600_000, "必须达到 OWASP 建议的 600k") };
         assert!(unlock_vault_at(&path, "new-master").is_ok());
         assert!(unlock_vault_at(&path, "bad-master").is_err());
 
@@ -779,7 +785,7 @@ mod tests {
         std::fs::write(&pubkey, b"ssh-ed25519 AAAAC3Nz... dou-test\n").unwrap();
         std::fs::write(&unrelated, b"hello").unwrap();
 
-        let removed = cleanup_plaintext_keys(&keys, &[active.clone()]);
+        let removed = cleanup_plaintext_keys(&keys, std::slice::from_ref(&active));
         assert_eq!(removed.len(), 1, "只应删除遗留的明文私钥: {removed:?}");
         assert!(!stale.exists(), "遗留明文私钥应被删除");
         assert!(active.exists(), "当前生效的私钥必须保留");

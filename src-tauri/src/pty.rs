@@ -8,10 +8,11 @@ use tokio::sync::mpsc;
 
 use crate::ssh;
 
+/// 一个 pty 会话。
+///
+/// 会话 id 即 `PtyState::sessions` 的 key，不另存一份；
+/// 连接目标（host/user）在 `open_pty` 入口已打过日志，也无需在会话里冗余留存。
 pub struct PtySession {
-    pub id: String,
-    pub host: String,
-    pub user: String,
     pub tx: mpsc::UnboundedSender<String>,
 }
 
@@ -30,7 +31,7 @@ pub async fn open_pty(
     key_path: &str,
 ) -> Result<String, String> {
     eprintln!("[pty] open_pty host={host} port={port} user={user} key={key_path}");
-    let mut session = match ssh::ssh_connect(app.clone(), host, port, user, key_path).await {
+    let session = match ssh::ssh_connect(app.clone(), host, port, user, key_path).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[pty] connect failed host={host}:{port} err={e}");
@@ -91,15 +92,7 @@ pub async fn open_pty(
     // 存到 state
     {
         let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.insert(
-            sid.clone(),
-            PtySession {
-                id: sid.clone(),
-                host: host.to_string(),
-                user: user.to_string(),
-                tx,
-            },
-        );
+        sessions.insert(sid.clone(), PtySession { tx });
     }
 
     Ok(sid)

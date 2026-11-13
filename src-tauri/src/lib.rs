@@ -28,10 +28,7 @@ fn ssh_target_up() -> bool {
 #[tauri::command]
 fn gateway_status() -> GatewayStatus {
     let endpoint = "http://127.0.0.1:7419/health".to_string();
-    let running = match reqwest::blocking::get(&endpoint) {
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let running = reqwest::blocking::get(&endpoint).is_ok();
     GatewayStatus {
         running,
         endpoint,
@@ -117,11 +114,7 @@ async fn pty_write(
     sid: String,
     data: String,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    let s = sessions
-        .get(&sid)
-        .ok_or_else(|| format!("session {sid} 不存在"))?;
-    s.tx.send(data.to_string()).map_err(|e| e.to_string())
+    pty::pty_write(&state, &sid, &data).await
 }
 
 #[tauri::command]

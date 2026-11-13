@@ -43,10 +43,10 @@ pub fn list(q: &TransferQueue) -> Vec<TransferTask> {
 }
 
 fn with_task<F: FnOnce(&mut TransferTask)>(q: &TransferQueue, id: &str, f: F) {
-    if let Ok(mut t) = q.tasks.lock() {
-        if let Some(t) = t.iter_mut().find(|t| t.id == id) {
-            f(t);
-        }
+    if let Ok(mut t) = q.tasks.lock()
+        && let Some(t) = t.iter_mut().find(|t| t.id == id)
+    {
+        f(t);
     }
 }
 
@@ -218,7 +218,7 @@ async fn run_download(
 ) -> Result<(), String> {
     let t = ssh::ssh_target();
     let app = app_handle(q)?;
-    let mut session = ssh::ssh_connect(app, &t.host, t.port, &t.user, &t.key_path).await?;
+    let session = ssh::ssh_connect(app, &t.host, t.port, &t.user, &t.key_path).await?;
     let (total, _) = transfer::remote_stat_session(&session, remote)
         .await
         .unwrap_or((0, 0));
@@ -297,7 +297,7 @@ async fn run_upload(
 ) -> Result<(), String> {
     let t = ssh::ssh_target();
     let app = app_handle(q)?;
-    let mut session = ssh::ssh_connect(app, &t.host, t.port, &t.user, &t.key_path).await?;
+    let session = ssh::ssh_connect(app, &t.host, t.port, &t.user, &t.key_path).await?;
     let local_size = std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
     let remote_size = transfer::remote_stat_session(&session, remote)
         .await
@@ -314,7 +314,7 @@ async fn run_upload(
     f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
     let mut written = start;
 
-    let mut channel = session
+    let channel = session
         .channel_open_session()
         .await
         .map_err(|e| e.to_string())?;
@@ -410,25 +410,25 @@ fn local_find(root: &str) -> HashMap<String, (u64, i64)> {
                 let p = e.path();
                 if p.is_dir() {
                     walk(&p, root, map);
-                } else if p.is_file() {
-                    if let (Ok(meta), Some(rel)) = (
+                } else if p.is_file()
+                    && let (Ok(meta), Some(rel)) = (
                         p.metadata(),
                         p.strip_prefix(root)
                             .ok()
                             .map(|r| r.to_string_lossy().replace('\\', "/")),
-                    ) {
-                        map.insert(
-                            rel,
-                            (
-                                meta.len(),
-                                meta.modified()
-                                    .ok()
-                                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                                    .map(|d| d.as_secs() as i64)
-                                    .unwrap_or(0),
-                            ),
-                        );
-                    }
+                    )
+                {
+                    map.insert(
+                        rel,
+                        (
+                            meta.len(),
+                            meta.modified()
+                                .ok()
+                                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0),
+                        ),
+                    );
                 }
             }
         }
@@ -468,7 +468,7 @@ async fn upload_file_session(
     let start = remote_size.min(local_size);
     let mut f = std::fs::File::open(local).map_err(|e| e.to_string())?;
     f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
-    let mut channel = session
+    let channel = session
         .channel_open_session()
         .await
         .map_err(|e| e.to_string())?;
@@ -551,7 +551,7 @@ async fn run_sync(
     // mode: push（本地→远端镜像）| pull（远端→本地镜像）| update（仅更优，不删）
     let t = ssh::ssh_target();
     let app = app_handle(q)?;
-    let mut session = ssh::ssh_connect(app, &t.host, t.port, &t.user, &t.key_path).await?;
+    let session = ssh::ssh_connect(app, &t.host, t.port, &t.user, &t.key_path).await?;
 
     // 三种模式语义：push=本地→远端镜像(删远端多余)；pull=远端→本地镜像(删本地多余)；
     // update=按更优方向同步(只传更新的)，不删除任一侧多余文件。
@@ -609,9 +609,9 @@ async fn run_sync(
     let total = to_transfer.len() as u64;
     with_task(q, id, |x| x.total = total);
     emit_progress(q);
-    let mut done = 0u64;
 
-    for item in &to_transfer {
+    // `done` 为已处理条数（从 1 起），与旧的 `done += 1` 语义保持一致。
+    for (done, item) in to_transfer.iter().enumerate() {
         if canceled(q, id) {
             with_task(q, id, |x| x.status = "Canceled".into());
             return Ok(());
@@ -652,8 +652,7 @@ async fn run_sync(
             let lp = format!("{}/{}", local_dir.trim_end_matches('/'), item);
             download_file_session(&session, &rp, &lp).await?;
         }
-        done += 1;
-        with_task(q, id, |x| x.done = done);
+        with_task(q, id, |x| x.done = done as u64 + 1);
         emit_progress(q);
     }
     Ok(())

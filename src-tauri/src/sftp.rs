@@ -21,7 +21,7 @@ pub async fn sftp_list(
     key_path: &str,
     path: &str,
 ) -> Result<Vec<SftpEntry>, String> {
-    let mut session = ssh::ssh_connect(app, host, port, user, key_path).await?;
+    let session = ssh::ssh_connect(app, host, port, user, key_path).await?;
 
     let mut channel = session
         .channel_open_session()

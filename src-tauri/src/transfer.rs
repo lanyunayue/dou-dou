@@ -17,7 +17,7 @@ pub async fn download(
     key_path: &str,
     remote: &str,
 ) -> Result<String, String> {
-    let mut session = ssh::ssh_connect(app, host, port, user, key_path).await?;
+    let session = ssh::ssh_connect(app, host, port, user, key_path).await?;
     let mut channel = session
         .channel_open_session()
         .await
@@ -48,7 +48,7 @@ pub async fn remote_stat(
     key_path: &str,
     remote: &str,
 ) -> Result<(u64, i64), String> {
-    let mut session = ssh::ssh_connect(app, host, port, user, key_path).await?;
+    let session = ssh::ssh_connect(app, host, port, user, key_path).await?;
     remote_stat_session(&session, remote).await
 }
 
@@ -73,7 +73,7 @@ pub async fn remote_stat_session(
             _ => {}
         }
     }
-    let parts: Vec<&str> = out.trim().split_whitespace().collect();
+    let parts: Vec<&str> = out.split_whitespace().collect();
     let size = parts
         .first()
         .and_then(|s| s.parse::<u64>().ok())
