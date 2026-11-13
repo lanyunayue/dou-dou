@@ -5,8 +5,8 @@ mod transfer;
 mod transfer_queue;
 mod vault;
 
-use serde::Serialize;
 use pty::PtyState;
+use serde::Serialize;
 use std::sync::Arc;
 use transfer_queue::TransferQueue;
 use vault::VaultState;
@@ -183,7 +183,9 @@ async fn tq_enqueue(
     remote: String,
     local: String,
 ) -> Result<String, String> {
-    Ok(transfer_queue::enqueue(&state, app, &kind, &label, &remote, &local))
+    Ok(transfer_queue::enqueue(
+        &state, app, &kind, &label, &remote, &local,
+    ))
 }
 
 #[tauri::command]
@@ -250,7 +252,9 @@ fn vault_status(state: tauri::State<'_, VaultState>) -> bool {
     vault::vault_status(state)
 }
 #[tauri::command]
-fn vault_list_targets(state: tauri::State<'_, VaultState>) -> Result<Vec<vault::VaultTarget>, String> {
+fn vault_list_targets(
+    state: tauri::State<'_, VaultState>,
+) -> Result<Vec<vault::VaultTarget>, String> {
     vault::vault_list_targets(state)
 }
 #[tauri::command]
@@ -296,7 +300,10 @@ fn ensure_gateway_started() {
         if std::path::Path::new(exe).exists() {
             let _ = std::process::Command::new(exe)
                 .env("DOU_SSH", "dou@127.0.0.1:22")
-                .env("DOU_SSH_KEY", r"C:\Users\mrhua\AppData\Local\dou\keys\id_ed25519")
+                .env(
+                    "DOU_SSH_KEY",
+                    r"C:\Users\mrhua\AppData\Local\dou\keys\id_ed25519",
+                )
                 .spawn();
         }
     });
@@ -324,11 +331,33 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            gateway_status, gateway_token, gateway_request, open_pty, pty_write, sftp_list,
-            sftp_download, remote_stat, host_key_list, host_key_forget, tq_enqueue, tq_list,
-            tq_cancel, tq_pause, tq_resume, tq_clear, sync_folders, vault_init, vault_unlock,
-            vault_lock, vault_status, vault_list_targets, vault_add_target, vault_get_key,
-            vault_test_connect, vault_remove_target, vault_notify
+            gateway_status,
+            gateway_token,
+            gateway_request,
+            open_pty,
+            pty_write,
+            sftp_list,
+            sftp_download,
+            remote_stat,
+            host_key_list,
+            host_key_forget,
+            tq_enqueue,
+            tq_list,
+            tq_cancel,
+            tq_pause,
+            tq_resume,
+            tq_clear,
+            sync_folders,
+            vault_init,
+            vault_unlock,
+            vault_lock,
+            vault_status,
+            vault_list_targets,
+            vault_add_target,
+            vault_get_key,
+            vault_test_connect,
+            vault_remove_target,
+            vault_notify
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

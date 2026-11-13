@@ -19,11 +19,12 @@
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce as AesNonce};
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use russh::keys::ssh_key::{HashAlg, PrivateKey};use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use base64::engine::general_purpose::STANDARD as B64;
 use ring::rand::SecureRandom;
+use russh::keys::ssh_key::{HashAlg, PrivateKey};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 use zeroize::Zeroizing;
@@ -66,8 +67,8 @@ pub struct VaultKeyInfo {
 
 #[derive(Serialize, Deserialize)]
 struct VaultFile {
-    salt: String, // base64
-    verifier: String, // base64(encrypt(VERIFIER_PLAINTEXT))
+    salt: String,           // base64
+    verifier: String,       // base64(encrypt(VERIFIER_PLAINTEXT))
     verifier_nonce: String, // base64
     /// PBKDF2 迭代次数。
     ///
@@ -139,7 +140,9 @@ fn aes_encrypt(key: &[u8], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>), Strin
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| e.to_string())?;
     let nonce_bytes = random_bytes(12);
     let nonce = AesNonce::from_slice(&nonce_bytes);
-    let ct = cipher.encrypt(nonce, plaintext).map_err(|e| e.to_string())?;
+    let ct = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|e| e.to_string())?;
     Ok((ct, nonce_bytes))
 }
 
@@ -161,9 +164,7 @@ fn read_vault(path: &Path) -> Result<VaultFile, VaultLoadError> {
             return Err(VaultLoadError::NotFound);
         }
         Err(e) => {
-            return Err(VaultLoadError::Corrupt(format!(
-                "读取保险库文件失败：{e}"
-            )));
+            return Err(VaultLoadError::Corrupt(format!("读取保险库文件失败：{e}")));
         }
     };
     let vf: VaultFile = match serde_json::from_str(&raw) {
@@ -427,8 +428,7 @@ pub fn vault_add_target(
         .clone()
         .ok_or_else(|| String::from("保险库已锁定，请先解锁"))?;
     // 明文私钥只在内存中短暂存在，加密后立即清零。
-    let plaintext =
-        Zeroizing::new(std::fs::read(&key_path).map_err(|e| format!("读取私钥: {e}"))?);
+    let plaintext = Zeroizing::new(std::fs::read(&key_path).map_err(|e| format!("读取私钥: {e}"))?);
     let (enc, nonce) = aes_encrypt(&key, &plaintext)?;
     let mut vf = read_vault(&state.path).map_err(|e| load_err_msg(&state.path, &e))?;
     vf.targets.retain(|t| t.name != name);
@@ -545,8 +545,8 @@ mod tests {
     ///
     /// 不在源码里内嵌任何私钥字面量：种子固定，结果确定。
     fn test_private_key_pem() -> String {
-        use russh::keys::ssh_key::private::{Ed25519Keypair, KeypairData};
         use russh::keys::ssh_key::LineEnding;
+        use russh::keys::ssh_key::private::{Ed25519Keypair, KeypairData};
         let kp = Ed25519Keypair::from_seed(&[0x42u8; 32]);
         let key = PrivateKey::new(KeypairData::Ed25519(kp), "dou-vault-test").unwrap();
         key.to_openssh(LineEnding::LF).unwrap().to_string()
@@ -756,10 +756,7 @@ mod tests {
             .filter(|e| e.path().is_file())
             .map(|e| e.path())
             .collect();
-        assert!(
-            leaked.is_empty(),
-            "明文私钥不应落盘，实际发现: {leaked:?}"
-        );
+        assert!(leaked.is_empty(), "明文私钥不应落盘，实际发现: {leaked:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -38,14 +38,21 @@ pub async fn open_pty(
         }
     };
 
-    let mut channel = session.channel_open_session().await
+    let mut channel = session
+        .channel_open_session()
+        .await
         .map_err(|e| format!("开 channel: {e}"))?;
-    channel.request_pty(false, "xterm", 80, 24, 640, 480, &[])
-        .await.map_err(|e| format!("pty: {e}"))?;
+    channel
+        .request_pty(false, "xterm", 80, 24, 640, 480, &[])
+        .await
+        .map_err(|e| format!("pty: {e}"))?;
     // F-06 长连接保护：优先挂到既有 tmux 会话，没有则新建；
     // 关窗断开后远端 tmux 会话保留，重开窗口可 attach 接管。
     let tmux_cmd = "tmux new-session -A -s dou 2>/dev/null || exec $SHELL";
-    channel.exec(true, tmux_cmd).await.map_err(|e| format!("shell: {e}"))?;
+    channel
+        .exec(true, tmux_cmd)
+        .await
+        .map_err(|e| format!("shell: {e}"))?;
 
     let sid = uuid::Uuid::new_v4().to_string();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -84,12 +91,15 @@ pub async fn open_pty(
     // 存到 state
     {
         let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.insert(sid.clone(), PtySession {
-            id: sid.clone(),
-            host: host.to_string(),
-            user: user.to_string(),
-            tx,
-        });
+        sessions.insert(
+            sid.clone(),
+            PtySession {
+                id: sid.clone(),
+                host: host.to_string(),
+                user: user.to_string(),
+                tx,
+            },
+        );
     }
 
     Ok(sid)
@@ -98,6 +108,8 @@ pub async fn open_pty(
 /// 前端输入写回 channel。
 pub async fn pty_write(state: &PtyState, sid: &str, data: &str) -> Result<(), String> {
     let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    let s = sessions.get(sid).ok_or_else(|| format!("session {sid} 不存在"))?;
+    let s = sessions
+        .get(sid)
+        .ok_or_else(|| format!("session {sid} 不存在"))?;
     s.tx.send(data.to_string()).map_err(|e| e.to_string())
 }

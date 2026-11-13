@@ -18,8 +18,14 @@ pub async fn download(
     remote: &str,
 ) -> Result<String, String> {
     let mut session = ssh::ssh_connect(app, host, port, user, key_path).await?;
-    let mut channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
-    channel.exec(true, format!("cat {remote}")).await.map_err(|e| e.to_string())?;
+    let mut channel = session
+        .channel_open_session()
+        .await
+        .map_err(|e| e.to_string())?;
+    channel
+        .exec(true, format!("cat {remote}"))
+        .await
+        .map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
     while let Some(msg) = channel.wait().await {
         match msg {
@@ -68,7 +74,13 @@ pub async fn remote_stat_session(
         }
     }
     let parts: Vec<&str> = out.trim().split_whitespace().collect();
-    let size = parts.first().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-    let mtime = parts.get(1).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+    let size = parts
+        .first()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mtime = parts
+        .get(1)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
     Ok((size, mtime))
 }

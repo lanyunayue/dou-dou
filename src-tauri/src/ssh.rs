@@ -7,8 +7,8 @@
 //!   - 密钥轮换后可用 `host_key_forget` 清除旧记录重新确认。
 
 use russh::client;
-use russh::keys::ssh_key::{HashAlg, PublicKey};
 use russh::keys::PublicKeyOrCertificate;
+use russh::keys::ssh_key::{HashAlg, PublicKey};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -84,7 +84,10 @@ fn store_lock() -> &'static Mutex<()> {
 pub fn verify_or_learn(host: &str, port: u16, fp: &str) -> HostKeyVerdict {
     let _g = store_lock().lock().unwrap_or_else(|e| e.into_inner());
     let mut entries = load_known_hosts();
-    if let Some(e) = entries.iter_mut().find(|e| e.host == host && e.port == port) {
+    if let Some(e) = entries
+        .iter_mut()
+        .find(|e| e.host == host && e.port == port)
+    {
         if e.fingerprint == fp {
             e.last_seen = now_epoch();
             let _ = save_known_hosts(&entries);
@@ -132,7 +135,10 @@ pub struct SshHandler {
 impl client::Handler for SshHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        key: &PublicKeyOrCertificate,
+    ) -> Result<bool, Self::Error> {
         let fp = host_key_fingerprint(key);
         match verify_or_learn(&self.host, self.port, &fp) {
             HostKeyVerdict::KnownMatch => Ok(true),
@@ -199,7 +205,9 @@ pub async fn ssh_connect_with_key(
 ) -> Result<DouHandle, String> {
     let (session, auth_ok) = ssh_connect_inner(app, host, port, user, key).await?;
     if !auth_ok {
-        return Err(format!("认证失败：服务器拒绝了 {user}@{host}:{port} 的公钥"));
+        return Err(format!(
+            "认证失败：服务器拒绝了 {user}@{host}:{port} 的公钥"
+        ));
     }
     Ok(session)
 }

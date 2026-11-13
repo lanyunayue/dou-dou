@@ -392,7 +392,10 @@ async fn remote_find(
         let size = parts[0].parse::<u64>().unwrap_or(0);
         let mtime = parts[1].parse::<i64>().unwrap_or(0);
         let path = parts[2..].join(" ");
-        let rel = path.strip_prefix(&format!("{root}/")).unwrap_or(&path).to_string();
+        let rel = path
+            .strip_prefix(&format!("{root}/"))
+            .unwrap_or(&path)
+            .to_string();
         map.insert(rel, (size, mtime));
     }
     Ok(map)
@@ -401,11 +404,7 @@ async fn remote_find(
 fn local_find(root: &str) -> HashMap<String, (u64, i64)> {
     let mut map = HashMap::new();
     let root_path = Path::new(root);
-    fn walk(
-        dir: &Path,
-        root: &Path,
-        map: &mut HashMap<String, (u64, i64)>,
-    ) {
+    fn walk(dir: &Path, root: &Path, map: &mut HashMap<String, (u64, i64)>) {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
                 let p = e.path();
@@ -414,11 +413,20 @@ fn local_find(root: &str) -> HashMap<String, (u64, i64)> {
                 } else if p.is_file() {
                     if let (Ok(meta), Some(rel)) = (
                         p.metadata(),
-                        p.strip_prefix(root).ok().map(|r| r.to_string_lossy().replace('\\', "/")),
+                        p.strip_prefix(root)
+                            .ok()
+                            .map(|r| r.to_string_lossy().replace('\\', "/")),
                     ) {
                         map.insert(
                             rel,
-                            (meta.len(), meta.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0)),
+                            (
+                                meta.len(),
+                                meta.modified()
+                                    .ok()
+                                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_secs() as i64)
+                                    .unwrap_or(0),
+                            ),
                         );
                     }
                 }
@@ -429,10 +437,7 @@ fn local_find(root: &str) -> HashMap<String, (u64, i64)> {
     map
 }
 
-async fn ensure_remote_dir(
-    session: &ssh::DouHandle,
-    dir: &str,
-) -> Result<(), String> {
+async fn ensure_remote_dir(session: &ssh::DouHandle, dir: &str) -> Result<(), String> {
     let mut channel = session
         .channel_open_session()
         .await
@@ -618,7 +623,10 @@ async fn run_sync(
         if let Some(rel) = item.strip_prefix("__DEL__") {
             if push {
                 let rp = format!("{}/{}", remote_dir.trim_end_matches('/'), rel);
-                let mut ch = session.channel_open_session().await.map_err(|e| e.to_string())?;
+                let mut ch = session
+                    .channel_open_session()
+                    .await
+                    .map_err(|e| e.to_string())?;
                 ch.exec(true, format!("rm -f {rp}"))
                     .await
                     .map_err(|e| e.to_string())?;
