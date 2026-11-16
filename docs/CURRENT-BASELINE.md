@@ -11,7 +11,7 @@
 
 | 项 | 状态 | 指向 |
 |---|---|---|
-| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `c3ff73b`（2026-11-16 本会话 S3 全量：token 层/四态/五页面/语法高亮） |
+| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `c5808ae`（2026-11-16 本会话 S3 视觉精致化：暗色标题栏/对比度/主操作视觉/空态禁用） |
 | 网关真源 | ✅ `dou-handover-20261113-2139\dou-workspace`（`crates/dou-gateway`），git 干净 | HEAD `bc29000`（2026-11-16 本会话 S3 网关支撑：/policy/rules+/snapshots+audit 判定过滤） |
 | 废弃镜像 | `dou-workspace/app/` 已标 DEPRECATED，不在其上开发 | commit `67be637` |
 | 回滚点 | 🔴 `_backup-20261113-2350`（恢复 git 前快照，207 文件）勿动 | 磁盘体检报告 |
@@ -46,7 +46,7 @@
 | 前端单测 | `npm run test`（dou-app） | 16 passed（useApproval 12 + useRequestGuard 4） | ✅ 2026-11-16 本会话（verify §9） |
 | 命令契约 | `python tools/verify-invoke.py` | 25 条无缺失 | ✅ 2026-11-16（verify §7） |
 | SSH 主线 | `cargo run --bin dou-ssh-selfcheck` | 10/10（TOFU、公钥认证、分块传输、断点续传、密钥变更拒绝） | ✅ 2026-11-16（verify §8） |
-| **真窗口** | `npm run tauri dev` | 窗口存在（1320×1000、标题「豆Dou」）+ 内容区非白屏 + 无崩溃 | ✅ 2026-11-16 本会话实测（截图 `d:\dou\app-window-20261116-postfix.png`；靶机未连接空态属功能性异常非渲染异常） |
+| **真窗口** | `npm run tauri dev` | 窗口存在（1320×1000、标题「豆Dou」）+ 内容区非白屏 + 无崩溃 | ✅ 2026-11-16 本会话实测（S3 精修版截图 `d:\dou\app-window-s3-final.png`：暗色标题栏无白断层、三栏布局/侧栏分组/四态空态渲染正常；靶机未连接空态属功能性异常非渲染异常） |
 
 ### §3 追记（2026-11-16 第二轮）
 
@@ -69,6 +69,14 @@
 - **S3 网关支撑**（dou-workspace `bc29000`，本轮之前提交）：`/policy/rules` + `/snapshots` 端点、audit query/export 判定过滤（所见即所得导出）、快照重跑聚合（id 带毫秒后缀，同指纹各占一行 GROUP BY）；store/snapshot 4 例新单测。
 - **复验**：verify.sh **28 PASS / 0 FAIL**（Git Bash 全路径）；`cargo test -p dou-gateway` 54/54 零回归；前端 16/16；分层 0 违规。
 
+### §3 追记（2026-11-16 第五轮：S3 真窗口视觉复核 + 精致化闭环）
+
+- **真窗口截屏工具**：`d:\dou\scripts\capture-window.ps1`（按进程名 app 枚举窗口句柄截屏，纯 ASCII 规避 PS5.1 GBK 误解码；PS5.1 不支持 `0u` 字面量需写 `[uint32]0`）。
+- **第一轮复核**（截图 `app-window-s3.png`）：暗色终端风渲染无异常、无白屏/错位/双渲染，四态空态正确；给出 4 项精致化建议（侧栏对比度 / 离线提示重复 / 保存按钮可点击感 / 标题栏暗色）。
+- **精致化批次**（dou-app `c5808ae`）：① `tauri.conf.json` 加 `"theme": "dark"`（标题栏暗色，实测无白色断层）；② `--dou-dim`/`douTokens.dim` 双端同步 `#8ca296→#9fb4a8`（侧栏次级文本与编辑器注释/行号同步提亮，Monaco 主题引用 douTokens 自动跟随）；③ `.editorbar .btn` 绿色实心主操作视觉（与「一键重试」同语言）；④ 编辑器空态 `:disabled="!editingFile"` + `.editorbar .btn:disabled` 中性色（未打开文件时保存不可点）；⑤ OfflineState files 变体压缩为「标题+真实原因+重试」两行式，消除与终端 overlay 的长句重复。
+- **设计决策**：files 变体保留 sshError 独立一行（不并入标题行）——sshError 是 fail-closed 的真实原因展示，230px 窄面板下单行会截断，两行式为信息密度与可读性的平衡点。
+- **复验**：`npm run build`（分层 43 文件 0 违规 + vue-tsc + vite）通过；前端单测 16/16；第二轮复核（截图 `app-window-s3-refined.png` / `app-window-s3-final.png`）确认四项建议全部落地、空态禁用色正确。
+
 ## 4. 功能工单现状（S0→S4 视角，详见 接下来计划-20261115.md §3）
 
 | 工单 | 状态 | 指向 |
@@ -87,7 +95,8 @@
 | D2 覆盖率门槛入脚本 | ✅ 观察期达成（vitest+coverage-v8 已入 verify.sh step 9，WARN 判定；门槛 核心≥70%/全量≥40% 当前 11.1%/11%，未达标不 FAIL） | dou-app `18ff118` |
 | D1 分层目录重构 | ✅ 本会话提交（分层重排 `3f1ddfc` + 依赖检查器 `ad32180`，反向引用构建期可检出，verify 28 PASS） | dou-app `3f1ddfc`/`ad32180`（tools/check-layers.mjs） |
 | S3 五页面/四态/设计 token/无障碍 | ✅ 本会话闭环（网关支撑 `bc29000` + 前端 `f6b7eac`/`31da434`/`f9a7119`/`c3ff73b`；判据：侧栏同级可达 13 项、连接管理 3 步新增主机、审计三维检索导出、六类高亮、C4 可跳转） | §3 追记第四轮 |
-| S3-验证 真窗口视觉复核 | ⏸ 新暗色 UI 真窗口截图待跑（`npm run tauri dev` 后人工/工具截屏） | 本行 |
+| S3 视觉精致化（复核驱动） | ✅ 本会话提交（`c5808ae`：暗色标题栏/对比度提亮/保存主操作视觉/空态禁用/离线提示减重复） | §3 追记第五轮 |
+| S3-验证 真窗口视觉复核 | ✅ 本会话闭环（两轮截屏复核 + 精致化批次落地 + 设计决策登记；截图 `app-window-s3-final.png`） | §3 追记第五轮 |
 | S4 打包/内测 | ⏸ 等外部条件（证书/靶机/样本/课题组），不承诺 | 接下来计划 §3 |
 
 ## 5. 网关安全硬约束（🔴 不改不放松）
