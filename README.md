@@ -2,18 +2,22 @@
 
 > 接手速查。工具链已固定为 **MSVC**，见 `rust-toolchain.toml`。
 
-## 一、环境（已配置好，无需重做）
+## 一、环境（2026-11-13 本机实测）
 
-| 项 | 位置 / 版本 |
+| 项 | 本机实际 |
 |---|---|
-| Rust 工具链 | `stable-x86_64-pc-windows-msvc`（rustc 1.99.1），由 `rust-toolchain.toml` 锁定 |
-| C++ 编译器 | Visual Studio 2026 Community，`.../VC/Tools/MSVC/14.50.35717` |
-| Windows SDK | `10.0.26100.0` |
-| Node / npm | 见 `node_modules`，Vue 3 + Vite 8 + TypeScript 6 |
-| 编辑器 | VS Code 1.145.2，`D:\Microsoft VS Code`（PATH 中 `code` 可直接用） |
-| 已装扩展 | rust-analyzer 0.3.3113 / Vue.volar 3.3.14 / tauri-vscode 0.2.9 / cpptools 1.35.6 |
-| 依赖缓存 | 全部离线可用（`CARGO_NET_OFFLINE=true`） |
-| 构建产物 | `src-tauri/target/`（前端 `dist/`） |
+| Rust | rustc / cargo **1.100.0**；GNU（默认）+ MSVC 两套工具链，rustfmt / clippy 齐备 |
+| 工具链锁定 | `rust-toolchain.toml` → `stable-x86_64-pc-windows-msvc`（进入 dou-app 自动切换） |
+| 环境变量 | `RUSTUP_HOME=D:\dev\.rustup`、`CARGO_HOME=D:\dev\.cargo`、`CARGO_TARGET_DIR=D:\dou-target` |
+| MinGW (GNU) | `D:\w64devkit\bin`（网关侧用，见 `dou-workspace/.cargo/config.toml`） |
+| Node / npm | v22.22.2 / 10.9.7；Vue 3 + Vite 8 + TypeScript 6 |
+| VS Code | **1.134.0**，`D:\VSCode`；PATH 中 `code` 可用 |
+| 已装扩展 | rust-analyzer 0.3.3113 / Vue.volar 3.3.14 / tauri-vscode 0.2.9 / cpptools（本轮补齐前 3 个） |
+| 依赖缓存 | 已联网预热；脚本按缓存状态决定是否 `--offline`，**不再无条件离线** |
+| 构建产物 | `D:\dou-target\debug\`（由 CARGO_TARGET_DIR 决定） |
+| ⚠️ 待装 | VC 工具集 14.51.36231 已有；**缺 Windows SDK 的 Lib/Include**（需提权 VS Installer 勾 Windows 11 SDK）。在此之前 `cargo check` / `cargo build` 会因链接器/系统库缺失失败；`vue-tsc` / `cargo fmt` / 契约核对可用 |
+
+> 上表是「本机实测」。旧机文档里的 rustc 1.99.1 / VS 2026 / VS Code 1.145.2 / `D:\Microsoft VS Code` 均已失效。
 
 先跑一次自检：
 
@@ -35,11 +39,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\env-check.ps1
 等价原始命令（VS Code 里 Ctrl+Shift+B 已配好）：
 
 ```bash
-cd src-tauri && cargo check --offline
-cd src-tauri && cargo build --offline
+cd src-tauri && cargo check
+cd src-tauri && cargo build
 npm run tauri dev
 npm run tauri build
-cd E:/思考/dou/tools/ssh-loopback && cargo run --offline --bin dou-ssh-selfcheck
+cd ../dou-workspace/tools/ssh-loopback && cargo run --bin dou-ssh-selfcheck
 ```
 
 ## 三、目录地图
@@ -52,13 +56,13 @@ cd E:/思考/dou/tools/ssh-loopback && cargo run --offline --bin dou-ssh-selfche
 | `src-tauri/src/vault.rs` | 凭据保险库：PBKDF2 + AES-256-GCM（**不含** `#[tauri::command]`，由 lib.rs 包装） |
 | `src-tauri/src/transfer_queue.rs` | 传输队列 / 分块续传 / 文件夹同步 |
 | `src-tauri/src/transfer.rs` `pty.rs` `sftp.rs` | 传输、交互终端、SFTP |
-| `E:/思考/dou/tools/ssh-loopback/` | 无外部服务器时的本地回环 SSH 靶机 + 自校验 |
-| `E:/思考/dou/docs/handover/` | 接手上下文包 / PRD / 架构设计 / 工单清单 |
-| `E:/思考/dou/crates/dou-gateway/` | 独立网关 workspace（**仍用 GNU 工具链**，见下） |
+| `../dou-workspace/tools/ssh-loopback/` | 无外部服务器时的本地回环 SSH 靶机 + 自校验 |
+| `../dou-workspace/docs/handover/` | 接手上下文包 / PRD / 架构设计 / 工单清单 |
+| `../dou-workspace/crates/dou-gateway/` | 独立网关 workspace（**仍用 GNU 工具链**，见下） |
 
 ## 四、两个容易踩的坑
 
-1. **两套工具链并存**：本客户端用 MSVC；网关 workspace（`E:/思考/dou`）仍在
+1. **两套工具链并存**：本客户端用 MSVC；网关 workspace（`../dou-workspace`）仍在
    `.cargo/config.toml` 里锁了 MinGW GNU 的 linker/ar，`scripts/build.ps1` 显式用
    `+stable-x86_64-pc-windows-gnu`。**不要**把那份 GNU 配置复制进本项目。
 2. **`crate-type` 已恢复官方三件套**（`staticlib` / `cdylib` / `rlib`）：早期 GNU 工具链下
@@ -82,10 +86,10 @@ F5 选「调试 dou.exe (MSVC)」（`cppvsdbg` 复用 VS 2026 调试引擎）。
 打开项目：
 
 ```powershell
-code E:\dou-app
+code .
 ```
 
-Visual Studio 2026 Community：「文件 → 打开 → 文件夹」选 `E:\dou-app`，把
+Visual Studio 2026 Community：「文件 → 打开 → 文件夹」选 `dou-app/`，把
 `src-tauri` 当普通文本/Rust 目录编辑；Rust 编译仍走 `cargo`，VS 主要用作编辑器与
 原生调试器。Tauri 是 cargo 工程，不是 `.sln`，不要试图生成解决方案文件。
 
@@ -100,7 +104,7 @@ Visual Studio 2026 Community：「文件 → 打开 → 文件夹」选 `E:\dou-
 
 ## 七、接手体检结论（2026-11-13）
 
-完整报告见 `E:\思考\dou\docs\handover\05-接手体检报告.md`。**构建、类型检查、静态分析
+完整报告见 `../dou-workspace/docs/handover/05-接手体检报告.md`。**构建、类型检查、静态分析
 全部 0 error**。已处理与待处理如下：
 
 | 优先级 | 问题 | 状态 |
@@ -120,7 +124,7 @@ Visual Studio 2026 Community：「文件 → 打开 → 文件夹」选 `E:\dou-
 仓库已初始化（分支 `main`），基线打 `handover-baseline` tag。
 
 ```bash
-cd E:\dou-app
+cd ./dou-app
 git log --oneline          # 查看历史
 git status                 # 应始终干净
 git tag -l                 # handover-baseline
@@ -138,7 +142,7 @@ git revert <commit>        # 单个提交可独立回滚（已实测）
 体检命令：
 
 ```bash
-cd src-tauri && cargo fmt --check && cargo clippy --offline --all-targets
-cd E:/dou-app && npx vue-tsc --noEmit
-bash E:/思考/dou/tools/check-contract.sh    # 前后端命令契约核对
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets
+cd ./dou-app && npx vue-tsc --noEmit
+bash ../dou-workspace/tools/check-contract.sh    # 前后端命令契约核对
 ```

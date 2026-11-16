@@ -4,7 +4,7 @@
     <div class="row">
       <select v-model="tqType"><option value="download">下载</option><option value="upload">上传</option></select>
       <input v-model="tqRemote" class="filter" placeholder="远端路径 /home/dou/a.txt" />
-      <input v-model="tqLocal" class="filter" placeholder="本地路径 C:/Users/mrhua/Downloads/a.txt" />
+      <input v-model="tqLocal" class="filter" placeholder="本地路径 D:/data/sample.txt" />
       <button class="btn ok" @click="enqueueTq">加入队列</button>
     </div>
     <div class="row">

@@ -5,10 +5,10 @@
 #      `ld.exe: error: export ordinal too large`（导出符号超出 PE 序号上限）。
 #   2. MSVC (link.exe) 是 Tauri / Windows 官方推荐工具链，无此限制，
 #      且能直接对接已安装的 Visual Studio 2026 Community 做调试。
-#   3. 本机中文路径 E:\思考\dou 会让 MinGW 的 dlltool 按 ANSI 解析路径失败，
+#   3. 旧机含中文的路径会让 MinGW 的 dlltool 按 ANSI 解析路径失败，
 #      MSVC 不受影响。
 #
-# 注意：网关 workspace (E:/思考/dou) 仍由 build.ps1 显式使用
+# 注意：网关 workspace 仍由 build.ps1 显式使用
 #       `cargo +stable-x86_64-pc-windows-gnu`，不受本文件影响。
 
 [toolchain]

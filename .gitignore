@@ -26,9 +26,12 @@ quarantine/
 id_rsa
 id_ed25519
 id_ecdsa
-# 本机构建产物在仓库外（E:/dou-target），此处双保险
+# 本机构建产物在仓库外（CARGO_TARGET_DIR，本机 D:\dou-target），此处双保险
 dou-target/
 target/
+
+# 交接用 git 历史打包，非源码，不入库
+history.bundle
 
 # Editor directories and files
 .vscode/*

@@ -5,7 +5,7 @@
     {
       "label": "cargo check (Rust 后端)",
       "type": "shell",
-      "command": "cargo check --offline",
+      "command": "cargo check",
       "options": { "cwd": "${workspaceFolder}/src-tauri" },
       "group": "build",
       "problemMatcher": ["$rustc"]
@@ -13,7 +13,7 @@
     {
       "label": "cargo build (Rust 后端)",
       "type": "shell",
-      "command": "cargo build --offline",
+      "command": "cargo build",
       "options": { "cwd": "${workspaceFolder}/src-tauri" },
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": ["$rustc"]
@@ -21,7 +21,7 @@
     {
       "label": "cargo test (Rust 后端)",
       "type": "shell",
-      "command": "cargo test --offline",
+      "command": "cargo test",
       "options": { "cwd": "${workspaceFolder}/src-tauri" },
       "group": "test",
       "problemMatcher": ["$rustc"]
@@ -53,8 +53,8 @@
     {
       "label": "SSH 回环自校验 (10 项)",
       "type": "shell",
-      "command": "cargo run --offline --bin dou-ssh-selfcheck",
-      "options": { "cwd": "E:/思考/dou/tools/ssh-loopback" },
+      "command": "cargo run --bin dou-ssh-selfcheck",
+      "options": { "cwd": "${workspaceFolder}/../../dou-workspace/tools/ssh-loopback" },
       "group": "test",
       "problemMatcher": []
     }

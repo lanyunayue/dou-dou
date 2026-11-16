@@ -29,10 +29,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 russh = { version = "0.65", default-features = false, features = ["ring"] }
-russh-sftp = "3.0"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
-sha2 = "0.10"
+# 历史遗留依赖已移除（2026-11-14 复核：src/ 全域零引用）：
+#   russh-sftp = "3.0" —— SFTP 目录树用 exec `ls -1p` 解析（见 src/sftp.rs），未走 SFTP 协议栈。
+#   sha2 = "0.10"      —— 指纹走 ssh-key 的 HashAlg::Sha256（ssh-key 自带 sha2 0.11 传递依赖）。
+# 若将来要改回真正的 SFTP 协议或自行算摘要，再按需加回并同步 Cargo.lock。
 # 凭据保险库：主密码派生(PBKDF2) + 对称加密(AES-256-GCM)。二者均已在 Cargo.lock 中，离线可构建。
 ring = "0.17"
 aes-gcm = "0.11"

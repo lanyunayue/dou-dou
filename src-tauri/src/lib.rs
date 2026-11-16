@@ -25,6 +25,16 @@ fn ssh_target_up() -> bool {
     TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
 }
 
+/// 前端留空 key_path 时，统一回退到 Rust 侧推导的标准密钥路径，
+/// 避免把某一台机器的用户名或盘符写死在前端。
+fn resolve_key_path(key_path: String) -> String {
+    if key_path.trim().is_empty() {
+        ssh::ssh_target().key_path
+    } else {
+        key_path
+    }
+}
+
 #[tauri::command]
 fn gateway_status() -> GatewayStatus {
     let endpoint = "http://127.0.0.1:7419/health".to_string();
@@ -105,7 +115,7 @@ async fn open_pty(
     user: String,
     key_path: String,
 ) -> Result<String, String> {
-    pty::open_pty(app, &state, &host, port, &user, &key_path).await
+    pty::open_pty(app, &state, &host, port, &user, &resolve_key_path(key_path)).await
 }
 
 #[tauri::command]
@@ -126,7 +136,7 @@ async fn sftp_list(
     key_path: String,
     path: String,
 ) -> Result<Vec<sftp::SftpEntry>, String> {
-    sftp::sftp_list(app, &host, port, &user, &key_path, &path).await
+    sftp::sftp_list(app, &host, port, &user, &resolve_key_path(key_path), &path).await
 }
 
 #[tauri::command]
@@ -138,7 +148,15 @@ async fn sftp_download(
     key_path: String,
     remote: String,
 ) -> Result<String, String> {
-    transfer::download(app, &host, port, &user, &key_path, &remote).await
+    transfer::download(
+        app,
+        &host,
+        port,
+        &user,
+        &resolve_key_path(key_path),
+        &remote,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -150,7 +168,15 @@ async fn remote_stat(
     key_path: String,
     remote: String,
 ) -> Result<(u64, i64), String> {
-    transfer::remote_stat(app, &host, port, &user, &key_path, &remote).await
+    transfer::remote_stat(
+        app,
+        &host,
+        port,
+        &user,
+        &resolve_key_path(key_path),
+        &remote,
+    )
+    .await
 }
 
 // ------------------------- 主机密钥（安全底座） -------------------------
@@ -289,15 +315,26 @@ fn vault_notify(app: tauri::AppHandle, unlocked: bool) {
 fn ensure_gateway_started() {
     static START_GATEWAY: std::sync::Once = std::sync::Once::new();
     START_GATEWAY.call_once(|| {
-        let exe = r"E:\dou-target\debug\dou-gateway.exe";
-        if std::path::Path::new(exe).exists() {
-            let _ = std::process::Command::new(exe)
-                .env("DOU_SSH", "dou@127.0.0.1:22")
-                .env(
-                    "DOU_SSH_KEY",
-                    r"C:\Users\mrhua\AppData\Local\dou\keys\id_ed25519",
-                )
-                .spawn();
+        // 网关 exe 优先由 DOU_GATEWAY_EXE 指定，否则按 CARGO_TARGET_DIR 推导，
+        // 最后回退到 D:\dou-target。不再钉死任何一台机器的盘符或用户名。
+        let exe = std::env::var("DOU_GATEWAY_EXE").unwrap_or_else(|_| {
+            let target =
+                std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| r"D:\dou-target".to_string());
+            format!(
+                r"{}\debug\dou-gateway.exe",
+                target.trim_end_matches(['\\', '/'])
+            )
+        });
+        if std::path::Path::new(&exe).exists() {
+            let mut cmd = std::process::Command::new(&exe);
+            // 环境里已给定的目标优先，只补缺项，避免覆盖用户配置。
+            if std::env::var_os("DOU_SSH").is_none() {
+                cmd.env("DOU_SSH", "dou@127.0.0.1:22");
+            }
+            if std::env::var_os("DOU_SSH_KEY").is_none() {
+                cmd.env("DOU_SSH_KEY", ssh::ssh_target().key_path);
+            }
+            let _ = cmd.spawn();
         }
     });
 }
@@ -316,6 +353,7 @@ pub fn run() {
         .manage(PtyState::default())
         .manage(Arc::new(TransferQueue::default()))
         .manage(VaultState::default())
+        .setup(|_app| Ok(()))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 关窗改成隐藏，不断 SSH 连接

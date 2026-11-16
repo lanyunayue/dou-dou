@@ -18,10 +18,18 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $root = Split-Path -Parent $PSScriptRoot
 $tauri = Join-Path $root "src-tauri"
-$loopback = "E:/思考/dou/tools/ssh-loopback"
+# Handover layout: dou-app/ and dou-workspace/ are siblings.
+$loopback = Join-Path (Split-Path -Parent $root) "dou-workspace\tools\ssh-loopback"
 
-# Keep offline: all crates are already vendored in the cargo cache.
-if (-not $env:CARGO_NET_OFFLINE) { $env:CARGO_NET_OFFLINE = "true" }
+# Only force offline when the cargo cache is actually populated.
+# A fresh machine has no cache, so --offline / CARGO_NET_OFFLINE must NOT be set.
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+$cache = Join-Path $cargoHome "registry\cache"
+if ((Test-Path -LiteralPath $cache) -and (Get-ChildItem -LiteralPath $cache -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    if (-not $env:CARGO_NET_OFFLINE) { $env:CARGO_NET_OFFLINE = "true" }
+} else {
+    $env:CARGO_NET_OFFLINE = "false"
+}
 $env:RUST_BACKTRACE = "1"
 
 function Run([string]$Label, [string]$Cwd, [string]$Cmd) {
@@ -34,18 +42,18 @@ function Run([string]$Label, [string]$Cwd, [string]$Cmd) {
 
 switch ($Action) {
     "check" {
-        Run "cargo check --offline" $tauri "cargo check --offline"
+        Run "cargo check" $tauri "cargo check"
         Run "vue-tsc --noEmit"     $root  "npm run build"
     }
-    "build"   { Run "cargo build --offline" $tauri "cargo build --offline" }
+    "build"   { Run "cargo build" $tauri "cargo build" }
     "dev"     { Run "tauri dev"             $root  "npm run tauri dev" }
     "release" { Run "tauri build"           $root  "npm run tauri build" }
     "fmt" {
         Run "cargo fmt --check"  $tauri "cargo fmt --check"
-        Run "cargo clippy"       $tauri "cargo clippy --offline -- -D warnings"
+        Run "cargo clippy"       $tauri "cargo clippy -- -D warnings"
     }
     "ssh-test" {
-        Run "SSH loopback selfcheck" $loopback "cargo run --offline --bin dou-ssh-selfcheck"
+        Run "SSH loopback selfcheck" $loopback "cargo run --bin dou-ssh-selfcheck"
     }
     default {
         Write-Output "Unknown action: $Action"

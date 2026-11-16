@@ -4,7 +4,10 @@ import { ref } from 'vue'
 export const SSH_HOST = '127.0.0.1'
 export const SSH_PORT = 22
 export const SSH_USER = 'dou'
-export const SSH_KEY = 'C:/Users/mrhua/AppData/Local/dou/keys/id_ed25519'
+// 不再钉死任何机器的用户名/盘符：留空时由 Rust 侧 ssh::ssh_target() 依据
+// DOU_SSH_KEY / LOCALAPPDATA 推导；也可在接入向导里手动填写，或用
+// dou-app/.env.local 的 VITE_DOU_SSH_KEY 覆盖默认值。
+export const SSH_KEY = (import.meta.env.VITE_DOU_SSH_KEY as string | undefined) ?? ''
 
 // 靶机离线原因：把裸 `os error 10061` 等转成人话，绝不渲染原始错误串
 export function sshOfflineReason(e: any): string {
