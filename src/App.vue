@@ -15,7 +15,7 @@
         <div class="nav-item" :class="{active: view==='scope'}" @click="view='scope'; loadTokens()">🔑 凭据与作用域</div>
         <div class="nav-item" :class="{active: view==='transfer'}" @click="view='transfer'; loadTq()">📤 传输队列</div>
         <div class="nav-item" :class="{active: view==='vault'}" @click="view='vault'; vaultList()">🔐 凭据保险库</div>
-        <div class="nav-item" :class="{active: view==='hostkeys'}" @click="view='hostkeys'; loadHostKeys()">🛡 主机密钥</div>
+        <div class="nav-item" :class="{active: view==='hostkeys'}" @click="view='hostkeys'; loadHostKeys(); loadGatewayHostKeys()">🛡 主机密钥</div>
         <div class="nav-item" @click="importMoba">📥 导入 MobaXterm</div>
         <div class="nav-item" @click="snapshot">📸 快照</div>
       </nav>
@@ -103,7 +103,7 @@ import { status, connSummary, refresh } from './composables/useGateway'
 import { pendingCount, loadTasks, startApprovalPolling } from './composables/useApproval'
 import { loadTokens } from './composables/useCredentials'
 import { loadTq } from './composables/useTransferQueue'
-import { loadHostKeys } from './composables/useHostKeys'
+import { loadHostKeys, loadGatewayHostKeys } from './composables/useHostKeys'
 import { fetchOnboard } from './composables/useOnboard'
 import { newTab, registerTerminalListener, registerWindowFocusListener } from './composables/useTerminal'
 import { registerTqListener } from './composables/useTransferQueue'
