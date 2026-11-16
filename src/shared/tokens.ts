@@ -15,7 +15,7 @@ export const douTokens = {
     border: '#223029',
     borderStrong: '#35473d',
     text: '#d6e2d9',
-    dim: '#8ca296',
+    dim: '#9fb4a8',
     accent: '#5ce8a4',
     accentStrong: '#7df0bb',
     ok: '#4ade80',

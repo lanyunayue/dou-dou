@@ -8,7 +8,7 @@
     </div>
     <VueMonacoEditor class="editorarea" v-model:value="editorText" :language="language" theme="dou-terminal" />
     <div class="editorbar">
-      <button class="btn" @click="saveFile">保存</button>
+      <button class="btn" :disabled="!editingFile" @click="saveFile">保存</button>
       <span class="hint">保存前比对远端 mtime；走 dou.put 过隔离区+扫描 · 高亮：{{ language }}</span>
     </div>
   </div>

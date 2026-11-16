@@ -1,9 +1,7 @@
 <template>
   <div v-if="variant === 'files'" class="ssh-offline-files">
-    <div class="ssh-title">⚠ 未连接靶机</div>
+    <div class="ssh-title">⚠ 未连接靶机 · 文件树暂不可用</div>
     <div class="hint">{{ sshError }}</div>
-    <div class="hint">文件树 / 终端 / 传输暂不可用；接入向导 / 审批 / 凭据 / 审计等 HTTP 管理功能不受影响。</div>
-    <div class="hint">本机 127.0.0.1:22 不可达（wsl.exe 被安全策略禁用 / Windows OpenSSH 未安装 / 无外部靶机）。靶机就绪后点「一键重试」恢复，不会伪造连接成功。</div>
     <button class="btn ok" @click="retrySsh">一键重试</button>
   </div>
   <div v-else class="ssh-offline">
