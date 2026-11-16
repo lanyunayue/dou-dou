@@ -171,9 +171,19 @@ fn migrate_time_units(conn: &Connection) -> Result<(), String> {
 }
 
 // ---------- 配额 / 租约 的通用读写（写穿） ----------
+//
+// A5：核心逻辑全部落在 `_on(&conn, ...)` 变体（可内存库单测），
+// 包装函数经全仓唯一 `open_conn()` 打库。调用方：tools.rs 的配额/租约变更点
+// 与 main.rs 的启动恢复；重启后配额计数与未过期租约从库还原，不清零。
 
 pub fn quota_snapshot(cred_id: &str) -> (u64, u64) {
-    let Ok(conn) = open_conn() else { return (0, 0) };
+    match open_conn() {
+        Ok(conn) => quota_snapshot_on(&conn, cred_id),
+        Err(_) => (0, 0),
+    }
+}
+
+pub fn quota_snapshot_on(conn: &Connection, cred_id: &str) -> (u64, u64) {
     conn.query_row(
         "SELECT used_calls, active FROM quota_state WHERE cred_id = ?1",
         rusqlite::params![cred_id],
@@ -183,7 +193,12 @@ pub fn quota_snapshot(cred_id: &str) -> (u64, u64) {
 }
 
 pub fn quota_write(cred_id: &str, used_calls: u64, active: u64) {
-    let Ok(conn) = open_conn() else { return };
+    if let Ok(conn) = open_conn() {
+        quota_write_on(&conn, cred_id, used_calls, active);
+    }
+}
+
+pub fn quota_write_on(conn: &Connection, cred_id: &str, used_calls: u64, active: u64) {
     let _ = conn.execute(
         "INSERT INTO quota_state (cred_id, used_calls, active, updated_ms) VALUES (?1,?2,?3,?4)
          ON CONFLICT(cred_id) DO UPDATE SET used_calls=excluded.used_calls,
@@ -192,8 +207,36 @@ pub fn quota_write(cred_id: &str, used_calls: u64, active: u64) {
     );
 }
 
+/// A5 启动恢复：读出全部配额计数（cred_id → (used_calls, active)）。
+pub fn quota_load_all() -> Vec<(String, u64, u64)> {
+    match open_conn() {
+        Ok(conn) => quota_load_all_on(&conn),
+        Err(_) => Vec::new(),
+    }
+}
+
+pub fn quota_load_all_on(conn: &Connection) -> Vec<(String, u64, u64)> {
+    let Ok(mut stmt) = conn.prepare("SELECT cred_id, used_calls, active FROM quota_state") else {
+        return Vec::new();
+    };
+    stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)? as u64,
+            r.get::<_, i64>(2)? as u64,
+        ))
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
 pub fn lease_start(session_id: &str, ttl_ms: i64) {
-    let Ok(conn) = open_conn() else { return };
+    if let Ok(conn) = open_conn() {
+        lease_start_on(&conn, session_id, ttl_ms);
+    }
+}
+
+pub fn lease_start_on(conn: &Connection, session_id: &str, ttl_ms: i64) {
     let now = now_ms();
     let _ = conn.execute(
         "INSERT INTO lease_state (session_id, started_ms, expires_ms) VALUES (?1,?2,?3)
@@ -203,8 +246,37 @@ pub fn lease_start(session_id: &str, ttl_ms: i64) {
     );
 }
 
+/// A5 启动恢复：读出**未过期**租约（session_id → 起始秒）。
+/// 已过期行留在库中但不会恢复（租约判定以秒与 `LEASE_SECS` 比较，语义与运行期一致）。
+pub fn lease_load_alive() -> Vec<(String, u64)> {
+    match open_conn() {
+        Ok(conn) => lease_load_alive_on(&conn),
+        Err(_) => Vec::new(),
+    }
+}
+
+pub fn lease_load_alive_on(conn: &Connection) -> Vec<(String, u64)> {
+    let Ok(mut stmt) =
+        conn.prepare("SELECT session_id, started_ms FROM lease_state WHERE expires_ms > ?1")
+    else {
+        return Vec::new();
+    };
+    let now = now_ms();
+    stmt.query_map(rusqlite::params![now], |r| {
+        Ok((r.get::<_, String>(0)?, (r.get::<_, i64>(1)? / 1000) as u64))
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
 pub fn lease_expired(session_id: &str) -> bool {
-    let Ok(conn) = open_conn() else { return false };
+    match open_conn() {
+        Ok(conn) => lease_expired_on(&conn, session_id),
+        Err(_) => false,
+    }
+}
+
+pub fn lease_expired_on(conn: &Connection, session_id: &str) -> bool {
     conn.query_row(
         "SELECT expires_ms FROM lease_state WHERE session_id=?1",
         rusqlite::params![session_id],
@@ -348,5 +420,57 @@ mod tests {
         assert!(session_try_lock_on(&conn, sid, "human", true));
         assert_eq!(session_owner_on(&conn, sid).as_deref(), Some("human"));
         let _ = session_unlock_on(&conn, sid, "human", false);
+    }
+
+    // ---------- A5：配额写穿与启动恢复 ----------
+
+    #[test]
+    fn quota_write_then_load_roundtrip() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE quota_state (
+                cred_id    TEXT PRIMARY KEY,
+                used_calls INTEGER NOT NULL DEFAULT 0,
+                active     INTEGER NOT NULL DEFAULT 0,
+                updated_ms INTEGER NOT NULL)",
+        ).unwrap();
+        quota_write_on(&conn, "cred_a", 7, 1);
+        quota_write_on(&conn, "cred_b", 0, 0);
+        // 同键再写 = upsert 覆盖（模拟第二次调用后的回落）
+        quota_write_on(&conn, "cred_a", 8, 0);
+        assert_eq!(quota_snapshot_on(&conn, "cred_a"), (8, 0));
+        let mut all = quota_load_all_on(&conn);
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            all,
+            vec![("cred_a".to_string(), 8, 0), ("cred_b".to_string(), 0, 0)]
+        );
+    }
+
+    #[test]
+    fn lease_load_alive_keeps_unexpired_and_drops_expired() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE lease_state (
+                session_id TEXT PRIMARY KEY,
+                started_ms INTEGER NOT NULL,
+                expires_ms INTEGER NOT NULL)",
+        ).unwrap();
+        // 未过期租约（走正常写穿路径）
+        lease_start_on(&conn, "s_alive", 60_000);
+        // 已过期租约（直接注入历史行）
+        let past = now_ms() - 10_000;
+        conn.execute(
+            "INSERT INTO lease_state (session_id, started_ms, expires_ms) VALUES ('s_dead', ?1, ?2)",
+            rusqlite::params![past - 30_000, past],
+        ).unwrap();
+        let alive = lease_load_alive_on(&conn);
+        let ids: Vec<&str> = alive.iter().map(|(s, _)| s.as_str()).collect();
+        assert!(ids.contains(&"s_alive"), "未过期租约必须恢复");
+        assert!(!ids.contains(&"s_dead"), "已过期租约不得恢复");
+        // 毫秒 → 秒换算：起始秒落在合理区间
+        let (_, start_sec) = alive.iter().find(|(s, _)| s == "s_alive").unwrap();
+        assert!(*start_sec > 0);
+        assert!(now_ms() / 1000 >= *start_sec as i64);
     }
 }

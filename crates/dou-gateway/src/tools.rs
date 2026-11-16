@@ -117,6 +117,8 @@ pub async fn call(st: &AppState, name: &str, args: &Value, cred: Option<&scope::
             }
             *calls += 1;
             *active += 1;
+            // A5 写穿：配额计数落库，重启后不清零（含活跃并发，fail-closed）。
+            crate::state::quota_write(&c.id, *calls, *active);
         }
         let result = match name {
             "dou.session_list" => session_list(st).await,
@@ -127,7 +129,11 @@ pub async fn call(st: &AppState, name: &str, args: &Value, cred: Option<&scope::
             _ => text_result(&format!("unknown tool: {name}"), true),
         };
         let mut q = st.quota.lock().await;
-        if let Some((_, active)) = q.get_mut(&c.id) { *active -= 1; }
+        if let Some((calls, active)) = q.get_mut(&c.id) {
+            *active = active.saturating_sub(1);
+            // A5 写穿：并发回落同步落库。
+            crate::state::quota_write(&c.id, *calls, *active);
+        }
         return result;
     }
     match name {
@@ -186,7 +192,11 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
                     json!({ "lease_secs": crate::auth::LEASE_SECS })));
                 return text_result("会话租约已超过 30 分钟，请重新配对接入", true);
             }
-            None => { leases.insert(session_id.to_string(), now); }
+            None => {
+                leases.insert(session_id.to_string(), now);
+                // A5 写穿：租约落库，重启后未过期租约恢复（TTL 语义不变）。
+                crate::state::lease_start(session_id, (crate::auth::LEASE_SECS * 1000) as i64);
+            }
             _ => {}
         }
     }

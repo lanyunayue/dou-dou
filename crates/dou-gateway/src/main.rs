@@ -155,6 +155,19 @@ async fn main() {
 
     println!("[dou-gateway]  └ bind   http://{bind}/mcp");
 
+    // A5：启动恢复半边 —— 配额计数与未过期租约从库还原（写穿设计）。
+    // 活跃并发按库值恢复（fail-closed：崩溃遗留的 active>0 仍拒新并发，宁可保守）。
+    let quota_map: HashMap<String, (u64, u64)> = state::quota_load_all()
+        .into_iter()
+        .map(|(id, used, active)| (id, (used, active)))
+        .collect();
+    let lease_map: HashMap<String, u64> = state::lease_load_alive().into_iter().collect();
+    println!(
+        "[dou-gateway]  ├ A5 恢复  配额 {} 项 · 未过期租约 {} 项",
+        quota_map.len(),
+        lease_map.len()
+    );
+
     let state = AppState {
         token: Arc::new(token),
         audit: Arc::new(audit_path),
@@ -162,8 +175,8 @@ async fn main() {
         sessions,
         taskhub: Arc::new(tasks::TaskHub::new()),
         sanitizer: Arc::new(sanitize::Sanitizer::new()),
-        quota: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        leases: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        quota: Arc::new(tokio::sync::Mutex::new(quota_map)),
+        leases: Arc::new(tokio::sync::Mutex::new(lease_map)),
     };
 
     let app = Router::new()
