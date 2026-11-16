@@ -22,7 +22,11 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import OfflineState from './OfflineState.vue'
-import { cwd, showHidden, fileFilter, visibleFiles, goUp, downloadCwd, onFile } from '../core/useFileTree'
-import { sshError } from '../core/useSsh'
+import { cwd, showHidden, fileFilter, visibleFiles, loadFiles, goUp, downloadCwd, onFile } from '../core/useFileTree'
+import { activeTarget, sshError } from '../core/useSsh'
+
+// R1：启动不再自动连内测目标——已连接时进入文件视图按需加载当前目录
+onMounted(() => { if (activeTarget.value) loadFiles(cwd.value) })
 </script>

@@ -7,15 +7,8 @@
         {{t.title}}<span v-if="t.badge" class="badge">{{t.badge}}</span>
         <span class="close" @click.stop="closeTab(t.sid)">×</span>
       </div>
-      <button class="tabadd" @click="newTab" title="新建 SSH 会话">+</button>
-      <button class="mini-btn" @click="openLocalTab" title="本地 PowerShell（无需靶机）">本地 Shell</button>
-      <!-- 认证方式（学 MobaXterm）：密码模式连接时输入，仅驻留内存 -->
-      <select v-model="authMode" class="auth-select" aria-label="SSH 认证方式">
-        <option value="key">密钥认证</option>
-        <option value="password">密码认证</option>
-      </select>
-      <input v-if="authMode==='password'" v-model="sshPassword" type="password" class="filter pw-input"
-             placeholder="SSH 密码（仅内存，不落盘）" aria-label="SSH 密码" autocomplete="off" />
+      <button class="tabadd" @click="toggleConnectForm" title="新建连接">+</button>
+      <button class="mini-btn" @click="openLocalTab" title="本地 PowerShell（无需远程主机）">本地 Shell</button>
       <button class="mini-btn" @click="exportTerm">导出</button>
       <input v-model="broadcast" class="broadcast" placeholder="广播到勾选→" @keyup.enter="doBroadcast" />
     </div>
@@ -33,9 +26,11 @@
       <span class="hb-item hb-dim">已运行 {{ fmtUptime(hostStats.uptime_s) }}</span>
     </div>
     <div class="term-wrap">
-      <div :ref="setTermEl" class="terminal"></div>
+      <div :ref="setTermEl" class="terminal" :style="{ visibility: formVisible ? 'hidden' : 'visible' }"></div>
       <!-- 优雅离线态：不黑屏 / 不纯白 / 不裸 os error / 不伪造连接成功 -->
-      <OfflineState v-if="sshError" variant="terminal" />
+      <OfflineState v-if="sshError && !formVisible" variant="terminal" />
+      <!-- R1 新建连接表单：无会话时常显，连接成功自动收起 -->
+      <ConnectForm v-if="formVisible" />
     </div>
   </div>
 </template>
@@ -43,11 +38,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import OfflineState from './OfflineState.vue'
+import ConnectForm from './ConnectForm.vue'
 import {
-  termEl, activeSid, sessionFilter, broadcast, visibleTabs,
-  newTab, openLocalTab, switchTab, closeTab, exportTerm, doBroadcast,
+  termEl, activeSid, sessionFilter, broadcast, visibleTabs, connectFormVisible as formVisible,
+  toggleConnectForm, openLocalTab, switchTab, closeTab, exportTerm, doBroadcast,
 } from '../core/useTerminal'
-import { authMode, sshPassword, sshError } from '../core/useSsh'
+import { sshError } from '../core/useSsh'
 import { hostStats } from '../core/useMonitor'
 import 'xterm/css/xterm.css'
 
@@ -69,16 +65,6 @@ function fmtUptime(s: number) {
 </script>
 
 <style scoped>
-.auth-select {
-  height: 26px;
-  background: var(--dou-panel);
-  color: var(--dou-text);
-  border: 1px solid var(--dou-border);
-  border-radius: var(--dou-radius-sm, 4px);
-  font-size: 12px;
-  padding: 0 4px;
-}
-.pw-input { width: 190px; }
 .hostbar {
   display: flex;
   gap: 16px;

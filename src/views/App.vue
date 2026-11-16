@@ -93,11 +93,10 @@ import { loadTokens } from '../core/useCredentials'
 import { loadTq } from '../core/useTransferQueue'
 import { loadHostKeys, loadGatewayHostKeys } from '../core/useHostKeys'
 import { fetchOnboard } from '../core/useOnboard'
-import { newTab, registerTerminalListener, registerWindowFocusListener } from '../core/useTerminal'
+import { registerTerminalListener, registerWindowFocusListener } from '../core/useTerminal'
 import { registerMonitorListener } from '../core/useMonitor'
 import { registerTqListener } from '../core/useTransferQueue'
 import { registerHostKeyListener } from '../core/useHostKeys'
-import { loadFiles } from '../core/useFileTree'
 import { view as useNavView } from '../core/useNav'
 
 const navs = [{key:'term',label:'终端'},{key:'files',label:'文件'}]
@@ -121,8 +120,7 @@ onMounted(async () => {
   unlisteners.push(await registerHostKeyListener())
   unlisteners.push(await registerTqListener())
 
-  await newTab()
-  loadFiles('/home/dou')
+  // R1：不再自动连内测默认目标——首屏呈现「新建连接」表单，由用户填写后连接
   fetchOnboard()
   loadTasks()
   loadTq()

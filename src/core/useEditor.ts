@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, sshError, audit, handleSshFailure } from './useSsh'
+import { sshArgs, sshError, audit, handleSshFailure } from './useSsh'
 import { emit } from '../events/useEventBus'
 import { notify, askConfirm } from '../shared/feedback'
 import type { RemoteStat } from '../shared/types'
@@ -14,8 +14,10 @@ export const editorText = ref('')
 export async function openRemoteFile(path: string) {
   editingFile.value = path
   editorText.value = ''
+  const args = sshArgs()
+  if (!args) { sshError.value = '尚未连接远程主机：请先在终端新建连接'; editingStat.value = null; return }
   try {
-    const st = await invoke('remote_stat', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, remote: path }) as [number, number]
+    const st = await invoke('remote_stat', { ...args, remote: path }) as [number, number]
     editingStat.value = { size: st[0], mtime: st[1] }
     // F-04 大文件懒加载：超过 2MB 不直接载入编辑器
     if (editingStat.value.size > 2 * 1024 * 1024) {
@@ -27,8 +29,10 @@ export async function openRemoteFile(path: string) {
 
 export async function saveFile() {
   // 保存前比对远端 mtime，防止覆盖他人改动（F-04）
+  const args = sshArgs()
+  if (!args) { notify('保存中止：尚未连接远程主机'); return }
   try {
-    const st = await invoke('remote_stat', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, remote: editingFile.value }) as [number, number]
+    const st = await invoke('remote_stat', { ...args, remote: editingFile.value }) as [number, number]
     if (editingStat.value && Number(st[1]) !== editingStat.value.mtime) {
       if (!askConfirm(`远端 ${editingFile.value} 已被改动（mtime 不一致），仍要覆盖保存吗？`)) return
     }

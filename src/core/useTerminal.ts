@@ -6,7 +6,7 @@ import { sendNotification } from '@tauri-apps/plugin-notification'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
-import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, authMode, sshPassword, sshError, audit, handleSshFailure } from './useSsh'
+import { activeTarget, SSH_KEY, sshError, audit, handleSshFailure, type SshTarget } from './useSsh'
 import type { TerminalTab } from '../shared/types'
 
 // 终端状态：多会话标签 / 当前会话 / 检索 / 广播
@@ -15,7 +15,12 @@ export const tabs = ref<TerminalTab[]>([])
 export const activeSid = ref('')
 export const sessionFilter = ref('')
 export const broadcast = ref('')
+// 新建连接表单：无会话时默认呈现（R1 首屏主路径），可手动开关
+export const showConnectForm = ref(true)
 let windowFocused = true
+
+// 表单可见 = 无任何会话，或用户主动打开（连接成功后自动收起）
+export const connectFormVisible = computed(() => tabs.value.length === 0 || showConnectForm.value)
 
 export const visibleTabs = computed(() => tabs.value.filter(t =>
   !sessionFilter.value || t.title.toLowerCase().includes(sessionFilter.value.toLowerCase())
@@ -44,34 +49,44 @@ function showActiveTerm() {
   }
 }
 
-// 连接靶机（学 MobaXterm：密钥失败兜不了底时可用密码认证）；
-// 失败进入优雅离线态，不黑屏、不裸 os error、不伪造连接成功
-export async function connectSsh() {
+// 新建连接（学 MobaXterm 的会话对话框：地址/端口/用户/认证一气呵成，R1+R5）。
+// 密码只经本调用内存传给 Rust（Zeroizing 用后即弃），不落盘不写日志。
+export interface ConnectOptions extends SshTarget {
+  auth: 'key' | 'password'
+  password?: string
+}
+
+export async function connectSsh(o: ConnectOptions) {
+  const host = o.host.trim(), user = o.user.trim()
+  if (!host) { sshError.value = '请填写主机地址'; return }
+  if (!user) { sshError.value = '请填写用户名'; return }
+  if (!(o.port >= 1 && o.port <= 65535)) { sshError.value = '端口需在 1-65535 之间'; return }
+  if (o.auth === 'password' && !o.password) {
+    sshError.value = '密码认证：请填写连接密码（仅驻留内存，不落盘）'
+    return
+  }
   try {
-    const pw = authMode.value === 'password' ? sshPassword.value : ''
-    if (authMode.value === 'password' && !pw) {
-      sshError.value = '密码认证：请先在工具条输入连接密码（仅驻留内存，不落盘）'
-      return
-    }
     const sid = await invoke('open_pty', {
-      host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY,
-      password: pw || undefined,
+      host, port: o.port, user, keyPath: SSH_KEY,
+      password: o.auth === 'password' ? o.password : undefined,
     }) as string
     sshError.value = ''
+    activeTarget.value = { host, port: o.port, user }
     const { term, fit } = createTerm()
-    term.write(`[已连接靶机 ${SSH_USER}@${SSH_HOST}:${SSH_PORT}（${authMode.value === 'password' ? '密码' : '密钥'}认证）]\r\n`)
+    term.write(`[已连接 ${user}@${host}:${o.port}（${o.auth === 'password' ? '密码' : '密钥'}认证）]\r\n`)
     term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
-    tabs.value.push({ sid, title: `会话 ${tabs.value.length+1}`, term, fit })
+    tabs.value.push({ sid, title: `${user}@${host}`, term, fit })
     activeSid.value = sid
+    showConnectForm.value = false
     showActiveTerm()
-    audit.value.unshift(`[${new Date().toLocaleTimeString()}] 新建会话 ${sid.slice(0,8)}（${authMode.value === 'password' ? '密码' : '密钥'}认证）`)
+    audit.value.unshift(`[${new Date().toLocaleTimeString()}] 新建会话 ${sid.slice(0,8)} → ${user}@${host}（${o.auth === 'password' ? '密码' : '密钥'}认证）`)
   } catch (e: any) {
-    handleSshFailure(e, '连接靶机')
-    // 不写裸 os error、不伪造「已连接」；离线态由模板覆盖层呈现，含一键重试
+    handleSshFailure(e, '连接主机')
+    // 不写裸 os error、不伪造「已连接」；错误由连接表单内联呈现，可改参数重试
   }
 }
 
-// 本地 Shell（学 MobaXterm 的 Local terminal）：无需靶机，本机 PowerShell 直开
+// 本地 Shell（学 MobaXterm 的 Local terminal）：无需远程主机，本机 PowerShell 直开
 export async function openLocalTab() {
   try {
     const sid = await invoke('open_local_pty') as string
@@ -81,6 +96,7 @@ export async function openLocalTab() {
     term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
     tabs.value.push({ sid, title: '本地 Shell', term, fit, local: true })
     activeSid.value = sid
+    showConnectForm.value = false
     showActiveTerm()
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 打开本地 Shell ${sid.slice(0,8)}`)
   } catch (e: any) {
@@ -88,7 +104,10 @@ export async function openLocalTab() {
   }
 }
 
-export async function newTab() { await connectSsh() }
+// 「+」按钮：开/关新建连接表单（无会话时表单常显，不可关）
+export function toggleConnectForm() {
+  showConnectForm.value = tabs.value.length === 0 ? true : !showConnectForm.value
+}
 
 export function switchTab(sid: string) {
   activeSid.value = sid
@@ -177,7 +196,7 @@ export function useTerminal() {
     broadcast,
     visibleTabs,
     connectSsh,
-    newTab,
+    toggleConnectForm,
     openLocalTab,
     switchTab,
     closeTab,

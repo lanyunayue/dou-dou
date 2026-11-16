@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, sshError, handleSshFailure } from './useSsh'
+import { sshArgs, sshError, handleSshFailure } from './useSsh'
 import { openRemoteFile } from './useEditor'
 import { useRequestGuard } from './useRequestGuard'
 import { notify } from '../shared/feedback'
@@ -22,10 +22,12 @@ export const visibleFiles = computed(() => files.value.filter(f => {
 }))
 
 export async function loadFiles(path: string) {
+  const args = sshArgs()
+  if (!args) { sshError.value = '尚未连接远程主机：请先在终端新建连接'; files.value = []; return }
   const id = loadGuard.begin()
   cwd.value = path
   try {
-    const list = await invoke<RemoteFile[]>('sftp_list', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, path })
+    const list = await invoke<RemoteFile[]>('sftp_list', { ...args, path })
     if (!loadGuard.isCurrent(id)) return
     files.value = list
   } catch (e: any) {
@@ -41,12 +43,14 @@ export function goUp() {
 }
 
 export async function downloadCwd() {
+  const args = sshArgs()
+  if (!args) { notify('尚未连接远程主机：请先在终端新建连接'); return }
   try {
-    const p = await invoke('sftp_download', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, remote: cwd.value + '/dou_put_test.txt' })
+    const p = await invoke('sftp_download', { ...args, remote: cwd.value + '/dou_put_test.txt' })
     notify('已下载到: ' + p)
   } catch (e: any) {
     handleSshFailure(e, '下载')
-    notify('下载失败：' + sshError.value + '\n靶机就绪后点「一键重试」恢复')
+    notify('下载失败：' + sshError.value)
   }
 }
 
