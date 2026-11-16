@@ -183,6 +183,17 @@ html, body {
   text-transform: uppercase;
 }
 .nav-group::before { content: ":: "; color: var(--dou-accent); }
+/* R2：「高级」可折叠分组标题（可点击） */
+.nav-toggle {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  user-select: none;
+}
+.nav-toggle:hover { color: var(--dou-text); }
 .nav-item {
   display: flex;
   align-items: center;

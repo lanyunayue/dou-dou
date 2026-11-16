@@ -16,21 +16,20 @@
         </template>
       </div>
       <button class="btn" @click="refresh">刷新</button>
+      <!-- R2 信息架构：默认 5 项自明入口（≤7），内部功能收进「高级」可折叠分组；每项 title 一句话 -->
       <nav class="nav" aria-label="主导航">
         <div class="nav-group">工作区</div>
-        <button v-for="n in navs" :key="n.key" type="button" class="nav-item" :class="{active: view===n.key}" :aria-current="view===n.key ? 'page' : undefined" @click="view=n.key">{{n.label}}</button>
-        <div class="nav-group">管理</div>
-        <button type="button" class="nav-item" :class="{active: view==='connections'}" :aria-current="view==='connections' ? 'page' : undefined" @click="view='connections'">🔗 连接管理</button>
-        <button type="button" class="nav-item" :class="{active: view==='policy'}" :aria-current="view==='policy' ? 'page' : undefined" @click="view='policy'">📜 策略配置</button>
-        <button type="button" class="nav-item" :class="{active: view==='audit'}" :aria-current="view==='audit' ? 'page' : undefined" @click="view='audit'">🧾 审计中心</button>
-        <button type="button" class="nav-item" :class="{active: view==='experiments'}" :aria-current="view==='experiments' ? 'page' : undefined" @click="view='experiments'">🧪 实验详情</button>
-        <button type="button" class="nav-item" :class="{active: view==='settings'}" :aria-current="view==='settings' ? 'page' : undefined" @click="view='settings'">⚙ 设置</button>
-        <div class="nav-group">凭据与安全</div>
-        <button type="button" class="nav-item" :class="{active: view==='onboard'}" :aria-current="view==='onboard' ? 'page' : undefined" @click="view='onboard'">🔌 接入向导</button>
-        <button type="button" class="nav-item" :class="{active: view==='approve'}" :aria-current="view==='approve' ? 'page' : undefined" @click="openApprove">✅ 审批<span v-if="pendingCount" class="badge">{{pendingCount}}</span></button>
-        <button type="button" class="nav-item" :class="{active: view==='scope'}" :aria-current="view==='scope' ? 'page' : undefined" @click="view='scope'; loadTokens()">🔑 凭据与作用域</button>
-        <button type="button" class="nav-item" :class="{active: view==='transfer'}" :aria-current="view==='transfer' ? 'page' : undefined" @click="view='transfer'; loadTq()">📤 传输队列</button>
-        <button type="button" class="nav-item" :class="{active: view==='hostkeys'}" :aria-current="view==='hostkeys' ? 'page' : undefined" @click="view='hostkeys'; loadHostKeys(); loadGatewayHostKeys()">🛡 主机密钥</button>
+        <button v-for="n in mainNavs" :key="n.key" type="button" class="nav-item" :class="{active: view===n.key}" :title="n.tip" :aria-current="view===n.key ? 'page' : undefined" @click="n.click ? n.click() : (view=n.key)">{{n.label}}</button>
+        <div class="nav-group">日常</div>
+        <button v-for="n in dailyNavs" :key="n.key" type="button" class="nav-item" :class="{active: view===n.key}" :title="n.tip" :aria-current="view===n.key ? 'page' : undefined" @click="n.click ? n.click() : (view=n.key)">{{n.label}}</button>
+        <button type="button" class="nav-group nav-toggle" :title="advancedOpen ? '收起内部功能' : '展开内部功能：审批/策略/审计等'" :aria-expanded="advancedOpen" @click="advancedOpen=!advancedOpen">
+          高级 {{ advancedOpen ? '▾' : '▸' }}
+        </button>
+        <template v-if="advancedOpen">
+          <button v-for="n in advancedNavs" :key="n.key" type="button" class="nav-item" :class="{active: view===n.key}" :title="n.tip" :aria-current="view===n.key ? 'page' : undefined" @click="n.click ? n.click() : (view=n.key)">
+            {{n.label}}<span v-if="n.badge" class="badge">{{n.badge}}</span>
+          </button>
+        </template>
       </nav>
     </aside>
     <div class="workspace">
@@ -68,6 +67,7 @@
       <AuditPanel v-if="view==='audit'" class="panel-page" />
       <ExperimentsPanel v-if="view==='experiments'" class="panel-page" />
       <SettingsPanel v-if="view==='settings'" class="panel-page" />
+      <HelpPanel v-if="view==='help'" class="panel-page" />
 
       </ErrorBoundary>
 
@@ -76,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
 import ErrorBanner from '../components/ErrorBanner.vue'
@@ -94,6 +94,7 @@ import PolicyPanel from '../components/PolicyPanel.vue'
 import AuditPanel from '../components/AuditPanel.vue'
 import ExperimentsPanel from '../components/ExperimentsPanel.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
+import HelpPanel from '../components/HelpPanel.vue'
 
 import { status, refresh } from '../adapters/useGateway'
 import { activeTarget } from '../core/useSsh'
@@ -109,7 +110,29 @@ import { registerTqListener } from '../core/useTransferQueue'
 import { registerHostKeyListener } from '../core/useHostKeys'
 import { view as useNavView } from '../core/useNav'
 
-const navs = [{key:'term',label:'终端'},{key:'files',label:'文件'}]
+// R2 信息架构：默认 5 项自明入口（工作区 2 + 日常 3），内部功能 8 项收进「高级」折叠分组
+interface NavEntry { key: string; label: string; tip: string; click?: () => void; badge?: number }
+const advancedOpen = ref(false)
+const mainNavs: NavEntry[] = [
+  { key: 'term', label: '终端', tip: '远程主机 SSH 会话与本地 Shell' },
+  { key: 'files', label: '文件', tip: '浏览与编辑远程主机上的文件' },
+]
+const dailyNavs: NavEntry[] = [
+  { key: 'connections', label: '🔗 连接管理', tip: '保存的主机档案，双击即可连接' },
+  { key: 'settings', label: '⚙ 设置', tip: '界面与行为偏好' },
+  { key: 'help', label: '❓ 帮助', tip: '上手指引与常见问题' },
+]
+// 审批徽章随待审数动态变化，收进高级分组后仍可见
+const advancedNavs = computed<NavEntry[]>(() => [
+  { key: 'onboard', label: '🔌 接入向导', tip: '生成接入代码片段与令牌说明' },
+  { key: 'approve', label: '✅ 审批', tip: '高危操作的放行队列', click: openApprove, badge: pendingCount.value || undefined },
+  { key: 'scope', label: '🔑 凭据与作用域', tip: '网关令牌与权限范围', click: () => { view.value = 'scope'; loadTokens() } },
+  { key: 'transfer', label: '📤 传输队列', tip: '文件传输任务与进度', click: () => { view.value = 'transfer'; loadTq() } },
+  { key: 'hostkeys', label: '🛡 主机密钥', tip: 'SSH 主机指纹核对与管理', click: () => { view.value = 'hostkeys'; loadHostKeys(); loadGatewayHostKeys() } },
+  { key: 'policy', label: '📜 策略配置', tip: '命令白名单与访问策略' },
+  { key: 'audit', label: '🧾 审计中心', tip: '操作日志检索与审计轨迹' },
+  { key: 'experiments', label: '🧪 实验详情', tip: '内部实验工单进度' },
+])
 // 视图状态在 core/useNav（全局），供页面内跳转（如 C4 结果目录导航）复用
 const view = useNavView
 
