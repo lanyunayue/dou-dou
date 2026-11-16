@@ -50,6 +50,8 @@ pub struct AppState {
     pub quota: Arc<tokio::sync::Mutex<HashMap<String, (u64, u64)>>>,
     /// 会话租约：session_id → 起始秒；单次任务最长 LEASE_SECS。
     pub leases: Arc<tokio::sync::Mutex<HashMap<String, u64>>>,
+    /// 主机密钥信任库（TOFU）：与 ssh::connect_* 共享同一份（B2）。
+    pub known: Arc<std::sync::Mutex<hostkey::KnownHosts>>,
 }
 
 #[tokio::main]
@@ -183,6 +185,7 @@ async fn main() {
         sanitizer: Arc::new(sanitize::Sanitizer::new()),
         quota: Arc::new(tokio::sync::Mutex::new(quota_map)),
         leases: Arc::new(tokio::sync::Mutex::new(lease_map)),
+        known: known.clone(),
     };
 
     let app = Router::new()
@@ -201,6 +204,8 @@ async fn main() {
         .route("/scope/revoke", axum::routing::post(revoke_token))
         .route("/onboard/config", get(onboard_config))
         .route("/onboard/write", axum::routing::post(onboard_write))
+        .route("/hostkey/list", get(hostkey_list))
+        .route("/hostkey/forget", axum::routing::post(hostkey_forget))
         .route("/console", get(console_page))
         .with_state(state.clone())
         // W-15：单层中间件统一收口全部路由；唯一 Bearer 解析点在 authz.rs。
@@ -444,6 +449,51 @@ async fn cancel_task(State(st): State<AppState>, body: String) -> Response {
             .unwrap(),
         Err(e) => json_err(StatusCode::BAD_REQUEST, &e),
     }
+}
+
+// ---------- B2 主机密钥信任库：列表 / 显式遗忘 ----------
+
+/// 已记录的主机条目。密钥只回短摘要（short_id），公钥全文不出网关。
+async fn hostkey_list(State(st): State<AppState>) -> Response {
+    let known = st.known.lock().unwrap_or_else(|e| e.into_inner());
+    let items: Vec<Value> = known
+        .entries()
+        .into_iter()
+        .map(|(addr, line)| json!({ "addr": addr, "key": hostkey::short_id(&line) }))
+        .collect();
+    json_ok(&json!({ "count": items.len(), "items": items }))
+}
+
+/// 显式遗忘一条主机记录（B2 二次确认闭环的网关侧出口）。
+/// 拒绝逻辑本身不变：Mismatch 依旧硬拒；本端点只移除旧记录，
+/// 下次连接重新走 TOFU FirstSeen（由界面提示用户肉眼确认指纹）。
+/// body: { "addr": "host:port" }
+async fn hostkey_forget(State(st): State<AppState>, body: String) -> Response {
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let addr = v
+        .get("addr")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    if addr.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "缺少 addr（host:port）");
+    }
+    let removed = st
+        .known
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .forget(&addr);
+    audit::write(
+        &st.audit,
+        audit::event(
+            "human",
+            "hostkey_forget",
+            &addr,
+            if removed { "allowed" } else { "no_record" },
+            json!({ "removed": removed }),
+        ),
+    );
+    json_ok(&json!({ "ok": removed, "addr": addr }))
 }
 
 // ---------- A1 会话锁：人工占用 / 释放 ----------

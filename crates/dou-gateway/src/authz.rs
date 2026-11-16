@@ -35,6 +35,8 @@ pub const M_ONLY_PATHS: &[&str] = &[
     "/session/lock",
     "/session/unlock",
     "/task/cancel",
+    // B2：遗忘主机密钥属信任决策，只允许主令牌（设备所有者）执行。
+    "/hostkey/forget",
 ];
 
 #[derive(Debug, Clone)]

@@ -30,6 +30,7 @@ impl Default for KnownHosts {
     }
 }
 
+#[derive(Debug)]
 pub enum Check {
     /// 与已记录的公钥一致
     Match,
@@ -82,6 +83,25 @@ impl KnownHosts {
         }
     }
 
+    /// 已记录的主机条目（按地址排序，仅用于展示；密钥给短摘要）。
+    pub fn entries(&self) -> Vec<(String, String)> {
+        let mut v: Vec<(String, String)> = self.map.iter().map(|(k, s)| (k.clone(), s.clone())).collect();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        v
+    }
+
+    /// 遗忘一条主机记录（B2 二次确认闭环：密钥轮换后由用户显式重信任）。
+    /// 返回是否确有记录被移除（以内存为准）。下次连接将走 FirstSeen 重新记录。
+    /// flush 失败不改变返回值：最坏情形是重启后旧记录从磁盘复活 → 再次
+    /// Mismatch 拒绝，方向仍然 fail-closed，不会产生任何连接旁路。
+    pub fn forget(&mut self, addr: &str) -> bool {
+        if self.map.remove(addr).is_none() {
+            return false;
+        }
+        let _ = self.flush();
+        true
+    }
+
     fn flush(&self) -> Result<(), String> {
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
@@ -107,4 +127,45 @@ pub fn short_id(line: &str) -> String {
         .rev()
         .collect();
     format!("{algo}:{head}…{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forget_then_recheck_is_first_seen() {
+        let mut kh = KnownHosts::default();
+        assert!(matches!(
+            kh.check_and_record("h1:22", "ssh-ed25519 AAAA_old"),
+            Check::FirstSeen
+        ));
+        assert!(kh.forget("h1:22"));
+        assert!(matches!(
+            kh.check_and_record("h1:22", "ssh-ed25519 AAAA_new"),
+            Check::FirstSeen
+        ));
+    }
+
+    #[test]
+    fn forget_unknown_addr_returns_false() {
+        let mut kh = KnownHosts::default();
+        assert!(!kh.forget("ghost:22"));
+    }
+
+    #[test]
+    fn entries_sorted_and_mismatch_keeps_record() {
+        let mut kh = KnownHosts::default();
+        let _ = kh.check_and_record("b:22", "ssh-ed25519 AAAA_b");
+        let _ = kh.check_and_record("a:22", "ssh-ed25519 AAAA_a");
+        let entries = kh.entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, "a:22");
+        // 换钥不匹配：记录保留原值，遗忘前重连依旧拒绝
+        match kh.check_and_record("a:22", "ssh-ed25519 AAAA_rotated") {
+            Check::Mismatch { stored } => assert_eq!(stored, "ssh-ed25519 AAAA_a"),
+            other => panic!("期望 Mismatch，实际 {other:?}"),
+        }
+        assert_eq!(kh.entries().len(), 2);
+    }
 }
