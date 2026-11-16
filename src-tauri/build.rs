@@ -67,7 +67,9 @@ fn main() {
 [dou] 裸 cargo build 产出的 exe 在没有 Vite 的机器上会整窗纯白。
 [dou] ======================================================";
         eprintln!("{}", DEV_WARNING);
-        println!("cargo:warning=[dou] dev 构建：产物不含前端资源，正式出包请用 npm run tauri build");
+        println!(
+            "cargo:warning=[dou] dev 构建：产物不含前端资源，正式出包请用 npm run tauri build"
+        );
     } else if !has_assets {
         panic!(
             "\n\
