@@ -144,7 +144,16 @@ async fn session_list(st: &AppState) -> Value {
     let map = st.sessions.lock().await;
     let items: Vec<Value> = map
         .iter()
-        .map(|(id, c)| json!({ "id": id, "user": c.user, "status": "connected" }))
+        .map(|(id, c)| {
+            let owner = crate::state::session_owner(id).unwrap_or_default();
+            json!({
+                "id": id,
+                "user": c.user,
+                "status": "connected",
+                "locked": !owner.is_empty(),
+                "owner": owner
+            })
+        })
         .collect();
     text_result(&json!({ "sessions": items }).to_string(), false)
 }
@@ -152,6 +161,11 @@ async fn session_list(st: &AppState) -> Value {
 async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value {
     let cmd = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
     let session_id = args.get("session").and_then(|v| v.as_str()).unwrap_or("default");
+
+    // A1 会话锁：代理调用被人占用时拒绝（人工优先）。
+    if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
+        return r;
+    }
 
     if let Some(sc) = scope {
         if !sc.command_patterns.is_empty()
@@ -178,11 +192,11 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
     }
     let policy = scope.map(|s| s.approval_policy.clone()).unwrap_or_else(|| "execute".to_string());
     let background = args.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
-    let timeout_sec = args
-        .get("timeout_sec")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(60)
-        .min(600);
+    // A2：仅当「显式传入 timeout_sec 且 >30」或「background 标志」才任务化；
+    // 未传 timeout_sec 的默认同步执行不受影响。
+    let explicit_timeout = args.get("timeout_sec").and_then(|v| v.as_u64());
+    let long_running = background || explicit_timeout.map(|t| t > 30).unwrap_or(false);
+    let timeout_sec = explicit_timeout.unwrap_or(60).min(600);
 
     let decision = policy::classify(cmd);
     audit::write(
@@ -207,13 +221,19 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
             true,
         ),
         policy::Verdict::Pending => {
-            let tid = st.taskhub.create_pending(session_id, cmd, &decision.reason, &policy).await;
+            // A4：审批卡片四要素——命令原文已在 task，此处补目标路径 + 预计影响。
+            let impact = estimate_impact(cmd);
+            let tid = st.taskhub.create_pending_with(
+                session_id, cmd, &decision.reason, &policy,
+                "", &impact, "",
+            ).await;
             text_result(
                 &json!({
                     "status": "pending_approval",
                     "task_id": tid,
                     "reason": decision.reason,
                     "segment": decision.segment,
+                    "impact": impact,
                     "hint": "在控制台 /console 点批准或拒绝；批准后后台执行"
                 })
                 .to_string(),
@@ -221,9 +241,14 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
             )
         }
         policy::Verdict::Auto => {
-            // 后台模式：长命令转任务句柄，立即返回 task_id
-            if background {
-                let tid = st.taskhub.create_pending(session_id, cmd, "background exec", &policy).await;
+            // A2 长命令任务化：超时 > 30s 自动移交后台任务句柄，立即返回 task_id。
+            // 客户端断开后远端进程继续跑，可查状态、可终止。
+            if long_running {
+                let impact = estimate_impact(cmd);
+                let tid = st.taskhub.create_pending_with(
+                    session_id, cmd, "background exec", &policy,
+                    "", &impact, "",
+                ).await;
                 // 直接标记 approved（策略已判 auto，无需人工批）
                 let _ = st.taskhub.decide(&tid, true, "auto-approved", false).await;
                 let hub = st.taskhub.clone();
@@ -374,22 +399,59 @@ fn truncate(s: &str, max: usize) -> String {
 /// 允许：/home/dou/、/tmp/、少数系统白名单文件；
 /// 拒绝：/etc/shadow、/etc/sudoers、.ssh 私钥、/root 等。
 fn check_remote_path(path: &str) -> Result<(), String> {
-    let denied = [
-        "/etc/shadow", "/etc/sudoers", "/etc/sudoers.d/", "/root/.ssh/", "/root/",
-        "/home/dou/.ssh/", "/home/*/.ssh/id_", "/proc/self/environ",
+    // B3 逃逸加固第一步：先做词法归一化，把 `..` / `.` / 重复斜杠折叠成真实路径，
+    // 否则 `/home/dou/projects/../../etc/shadow` 会被纯字符串 contains 漏判。
+    let normalized = normalize_remote_path(path)?;
+
+    // 归一化后做敏感前缀拒绝（用 starts_with 而非 contains，避免误伤合法路径）。
+    let denied_prefix = [
+        "/etc/shadow", "/etc/sudoers", "/etc/sudoers.d/", "/root/", "/root",
+        "/home/dou/.ssh/", "/proc/self/environ", "/proc/sys/",
     ];
-    for d in &denied {
-        if path.contains(d) {
+    for d in &denied_prefix {
+        if normalized == *d || normalized.starts_with(&format!("{d}/")) || normalized.starts_with(d) {
             return Err(format!("路径越出作用域：{d} 类路径禁止代理访问"));
         }
     }
-    // 必须落在允许根下
-    if !(path.starts_with("/home/dou/") || path.starts_with("/tmp/")
-        || path == "/etc/hostname" || path == "/etc/os-release" || path == "/etc/passwd")
+    // 私钥文件名拒绝（不论所在目录）。
+    let fname = normalized.rsplit('/').next().unwrap_or("");
+    if fname.starts_with("id_rsa") || fname.starts_with("id_ed25519")
+        || fname.starts_with("id_ecdsa") || fname == "authorized_keys"
+    {
+        return Err(format!("私钥/授权文件禁止代理访问：{fname}"));
+    }
+    // 必须落在允许根下（归一化后比较）。
+    if !(normalized.starts_with("/home/dou/") || normalized.starts_with("/tmp/")
+        || normalized == "/etc/hostname" || normalized == "/etc/os-release" || normalized == "/etc/passwd")
     {
         return Err(format!("路径 {path} 越出允许根（/home/dou/、/tmp/）"));
     }
     Ok(())
+}
+
+/// B3 路径归一化：折叠 `..` / `.` / 重复斜杠，越出根目录时报错。
+/// 例：`/home/dou/projects/../../etc/shadow` → `/etc/shadow`（随后被敏感前缀拒绝）。
+fn normalize_remote_path(path: &str) -> Result<String, String> {
+    if path.is_empty() {
+        return Err("路径不能为空".to_string());
+    }
+    let absolute = path.starts_with('/');
+    let mut stack: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if stack.pop().is_none() && absolute {
+                    return Err(format!("路径 {path} 越出根目录（../ 逃逸）"));
+                }
+            }
+            s => stack.push(s),
+        }
+    }
+    if !absolute {
+        return Err(format!("仅允许绝对路径：{path}"));
+    }
+    Ok(format!("/{}", stack.join("/")))
 }
 
 async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value {
@@ -397,6 +459,10 @@ async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let start = args.get("start_line").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
     let end = args.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+
+    if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
+        return r;
+    }
 
     if path.is_empty() {
         return text_result(&json!({"status":"error","message":"path 不能为空"}).to_string(), true);
@@ -442,6 +508,9 @@ async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
     let session_id = args.get("session").and_then(|v| v.as_str()).unwrap_or("default");
     let remote = args.get("remote_path").and_then(|v| v.as_str()).unwrap_or("");
     let local_ref = args.get("local_ref").and_then(|v| v.as_str()).unwrap_or("");
+    if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
+        return r;
+    }
     if remote.is_empty() || local_ref.is_empty() {
         return text_result(&json!({"status":"error","message":"remote_path 与 local_ref 必填"}).to_string(), true);
     }
@@ -484,6 +553,9 @@ async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
 async fn get(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value {
     let session_id = args.get("session").and_then(|v| v.as_str()).unwrap_or("default");
     let remote = args.get("remote_path").and_then(|v| v.as_str()).unwrap_or("");
+    if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
+        return r;
+    }
     if remote.is_empty() {
         return text_result(&json!({"status":"error","message":"remote_path 必填"}).to_string(), true);
     }
@@ -557,6 +629,34 @@ async fn get(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
     }
 }
 
+/// A4：按命令估算「预计影响」的人话描述，供审批卡片展示。
+/// 只做粗粒度判断，不替代策略引擎。
+fn estimate_impact(cmd: &str) -> String {
+    let lower = cmd.to_ascii_lowercase();
+    if lower.contains("rm -rf") || lower.contains("rm -fr") || lower.contains("rmdir") {
+        "删除文件/目录".to_string()
+    } else if lower.contains("mkfs") || lower.contains("fdisk") || lower.contains("dd if=") {
+        "写入块设备/磁盘（高危）".to_string()
+    } else if lower.contains("chmod") || lower.contains("chown") || lower.contains("chattr") {
+        "修改文件权限/属主".to_string()
+    } else if lower.contains("pip install") || lower.contains("apt ") || lower.contains("apt-get")
+        || lower.contains("yum ") || lower.contains("npm install") || lower.contains("brew install") {
+        "安装软件包".to_string()
+    } else if lower.contains("git push") || lower.contains("git commit") {
+        "提交/推送代码".to_string()
+    } else if lower.contains("sudo") || lower.contains("su ") {
+        "提权操作".to_string()
+    } else if lower.starts_with("install ") || lower.contains(" install ") {
+        "安装文件".to_string()
+    } else if lower.contains("mv ") || lower.contains("cp ") {
+        "移动/复制文件".to_string()
+    } else if lower.contains(">") || lower.contains(">>") {
+        "重定向写入文件".to_string()
+    } else {
+        "执行命令（需人工确认）".to_string()
+    }
+}
+
 fn not_implemented(name: &str, why: &str) -> Value {
     text_result(
         &json!({ "status": "not_implemented", "tool": name, "reason": why }).to_string(),
@@ -564,9 +664,86 @@ fn not_implemented(name: &str, why: &str) -> Value {
     )
 }
 
+/// A1 会话锁：代理（设备令牌）调用被人工占用时拒绝。
+/// 返回 `None` 表示放行；`Some` 为拒绝响应（已写审计）。
+/// 人工（主令牌，`is_agent == false`）优先，不受锁限制。
+fn lock_denied(st: &AppState, session_id: &str, is_agent: bool) -> Option<Value> {
+    if !is_agent {
+        return None;
+    }
+    match crate::state::session_owner(session_id) {
+        Some(owner) if owner == "human" => {
+            audit::write(&st.audit, audit::event(
+                "agent", "session_locked", session_id, "denied",
+                json!({ "owner": owner }),
+            ));
+            Some(text_result(
+                &json!({
+                    "status": "session_locked",
+                    "owner": owner,
+                    "reason": "该会话正被人工占用，代理请求已拒绝，请等待人工释放"
+                }).to_string(),
+                true,
+            ))
+        }
+        _ => None,
+    }
+}
+
 pub fn text_result(text: &str, is_error: bool) -> Value {
     json!({
         "content": [ { "type": "text", "text": text } ],
         "isError": is_error
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_folds_dotdot() {
+        assert_eq!(normalize_remote_path("/home/dou/projects/../../etc/shadow").unwrap(), "/home/etc/shadow");
+        assert_eq!(normalize_remote_path("/home/dou/a/./b//c").unwrap(), "/home/dou/a/b/c");
+        assert_eq!(normalize_remote_path("/tmp/./x/../y").unwrap(), "/tmp/y");
+        // 三个 ../ 才回到根
+        assert_eq!(normalize_remote_path("/home/dou/projects/../../../etc/shadow").unwrap(), "/etc/shadow");
+    }
+
+    #[test]
+    fn normalize_rejects_root_escape() {
+        assert!(normalize_remote_path("/../../etc/shadow").is_err());
+        assert!(normalize_remote_path("../etc/shadow").is_err());
+    }
+
+    #[test]
+    fn normalize_requires_absolute() {
+        assert!(normalize_remote_path("home/dou/x").is_err());
+    }
+
+    #[test]
+    fn check_path_blocks_dotdot_escape() {
+        // 归一化后落到 /etc/shadow，应被拒
+        assert!(check_remote_path("/home/dou/projects/../../../etc/shadow").is_err());
+        assert!(check_remote_path("/tmp/../../root/.ssh/id_rsa").is_err());
+        // 越出 /home/dou 允许根（归一化到 /home/etc），应被拒
+        assert!(check_remote_path("/home/dou/projects/../../etc/shadow").is_err());
+        // 合法路径放行
+        assert!(check_remote_path("/home/dou/data/train.log").is_ok());
+        assert!(check_remote_path("/tmp/note.txt").is_ok());
+    }
+
+    #[test]
+    fn check_path_blocks_private_keys_anywhere() {
+        assert!(check_remote_path("/tmp/id_rsa").is_err());
+        assert!(check_remote_path("/home/dou/.ssh/id_ed25519").is_err());
+        assert!(check_remote_path("/home/dou/data/authorized_keys").is_err());
+    }
+
+    #[test]
+    fn impact_estimation_smoke() {
+        assert!(estimate_impact("rm -rf /data").contains("删除"));
+        assert!(estimate_impact("pip install torch").contains("安装"));
+        assert!(estimate_impact("git push origin").contains("提交"));
+    }
 }

@@ -175,6 +175,9 @@ async fn main() {
         .route("/audit/export", get(audit_export))
         .route("/tasks", get(tasks_list))
         .route("/approve", axum::routing::post(approve_task))
+        .route("/task/cancel", axum::routing::post(cancel_task))
+        .route("/session/lock", axum::routing::post(session_lock))
+        .route("/session/unlock", axum::routing::post(session_unlock))
         .route("/scope/tokens", get(scope_tokens).post(issue_token))
         .route("/scope/revoke", axum::routing::post(revoke_token))
         .route("/onboard/config", get(onboard_config))
@@ -340,6 +343,14 @@ async fn audit_export(State(st): State<AppState>) -> Response {
 }
 
 async fn tasks_list(State(st): State<AppState>) -> Response {
+    // A3 审批超时：读取任务列表时惰性触发 5min 超时拒绝。
+    let expired = st.taskhub.expire_stale_pending(5 * 60 * 1000).await;
+    if expired > 0 {
+        audit::write(&st.audit, audit::event(
+            "system", "approval_timeout", "-", "denied",
+            json!({ "expired_count": expired, "timeout_min": 5 }),
+        ));
+    }
     let tasks = st.taskhub.list_all().await;
     let items: Vec<Value> = tasks.iter().map(tasks::task_to_json).collect();
     let body = serde_json::to_string(&json!({"count": items.len(), "items": items})).unwrap_or_default();
@@ -348,6 +359,62 @@ async fn tasks_list(State(st): State<AppState>) -> Response {
         .header("Content-Type", "application/json; charset=utf-8")
         .body(body.into())
         .unwrap()
+}
+
+/// A2 终止任务。body: { "task_id": "task_xxx" }。
+async fn cancel_task(State(st): State<AppState>, body: String) -> Response {
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let id = v.get("task_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    if id.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "task_id 必填");
+    }
+    match st.taskhub.cancel(&id).await {
+        Ok(Some(t)) => {
+            audit::write(&st.audit, audit::event(
+                "human", "task_cancel", &id, "allowed",
+                json!({ "command": t.command, "prev_status": "running_or_pending" }),
+            ));
+            json_ok(&json!({ "ok": true, "task_id": id, "status": "cancelled" }))
+        }
+        Ok(None) => Response::builder().status(StatusCode::NOT_FOUND).body("{}".into()).unwrap(),
+        Err(e) => json_err(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+// ---------- A1 会话锁：人工占用 / 释放 ----------
+
+/// 人工占用会话（谁先占用谁持有，人工优先）。
+/// body: { "session": "default" }。占用后代理在该会话的调用将被拒绝。
+async fn session_lock(State(st): State<AppState>, body: String) -> Response {
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let session = v.get("session").and_then(|x| x.as_str()).unwrap_or("default").to_string();
+    // 人工占用强制成功（force=true），覆盖任何既有占用。
+    let ok = state::session_try_lock(&session, "human", true);
+    audit::write(&st.audit, audit::event(
+        "human", "session_lock", &session, if ok { "allowed" } else { "failed" },
+        json!({}),
+    ));
+    if ok {
+        json_ok(&json!({ "ok": true, "session": session, "owner": "human" }))
+    } else {
+        json_err(StatusCode::INTERNAL_SERVER_ERROR, "占用会话失败（状态库不可用）")
+    }
+}
+
+/// 释放会话锁。body: { "session": "default" }。
+async fn session_unlock(State(st): State<AppState>, body: String) -> Response {
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let session = v.get("session").and_then(|x| x.as_str()).unwrap_or("default").to_string();
+    let ok = state::session_unlock(&session, "human", true);
+    audit::write(&st.audit, audit::event(
+        "human", "session_unlock", &session, if ok { "allowed" } else { "failed" },
+        json!({}),
+    ));
+    if ok {
+        json_ok(&json!({ "ok": true, "session": session, "released": true }))
+    } else {
+        json_err(StatusCode::INTERNAL_SERVER_ERROR, "释放会话失败（状态库不可用）")
+    }
 }
 
 // ---------- 凭据与作用域 ----------

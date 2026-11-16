@@ -32,6 +32,9 @@ pub const M_ONLY_PATHS: &[&str] = &[
     "/console",
     "/scope/tokens",
     "/scope/revoke",
+    "/session/lock",
+    "/session/unlock",
+    "/task/cancel",
 ];
 
 #[derive(Debug, Clone)]

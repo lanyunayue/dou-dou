@@ -72,7 +72,10 @@ pub fn init_state_schema() -> Result<(), String> {
             exit_code     INTEGER,
             created_ms    INTEGER NOT NULL,
             decided_ms    INTEGER,
-            done_ms       INTEGER
+            done_ms       INTEGER,
+            target_path   TEXT NOT NULL DEFAULT '',
+            history_count INTEGER NOT NULL DEFAULT 0,
+            impact        TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_task_status ON task_state(status);
 
@@ -100,7 +103,9 @@ pub fn init_state_schema() -> Result<(), String> {
             source     TEXT,
             status     TEXT NOT NULL DEFAULT 'active',
             started_ms INTEGER NOT NULL,
-            ended_ms   INTEGER
+            ended_ms   INTEGER,
+            owner      TEXT,
+            locked     INTEGER NOT NULL DEFAULT 0
         );
 
         -- 防爆破：滑动窗口失败计数 + 指数退避锁定
@@ -119,7 +124,35 @@ pub fn init_state_schema() -> Result<(), String> {
     .map_err(|e| format!("建状态表: {e}"))?;
 
     migrate_time_units(&conn)?;
+    migrate_session_meta_lock(&conn);
+    migrate_task_state_columns(&conn);
     Ok(())
+}
+
+/// 幂等迁移：给旧库的 `task_state` 补 A4 三列（target_path / history_count / impact）。
+fn migrate_task_state_columns(conn: &Connection) {
+    let _ = conn.execute(
+        "ALTER TABLE task_state ADD COLUMN target_path TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE task_state ADD COLUMN history_count INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE task_state ADD COLUMN impact TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+}
+
+/// 幂等迁移：给旧库的 `session_meta` 补 `owner` / `locked` 两列。
+/// SQLite 不支持 `ADD COLUMN IF NOT EXISTS`，靠「尝试后忽略重复列」实现幂等。
+fn migrate_session_meta_lock(conn: &Connection) {
+    let _ = conn.execute("ALTER TABLE session_meta ADD COLUMN owner TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE session_meta ADD COLUMN locked INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
 }
 
 /// 幂等迁移：`credential` 表的秒值（< 1e11）统一 ×1000 为毫秒。
@@ -181,6 +214,80 @@ pub fn lease_expired(session_id: &str) -> bool {
     .unwrap_or(false)
 }
 
+// ---------- 会话锁（A1：人机争抢仲裁） ----------
+//
+// 语义：谁先占用谁持有；人工优先。锁定信息写穿 `session_meta.owner/locked`，
+// 重启后仍可恢复占用归属。锁不落 SSH 句柄，只落「谁占着」的元数据。
+
+/// 尝试占用会话。成功返回 true；已被他人占用返回 false。
+/// 人工（human）抢占已锁会话时强制成功（人工优先）。
+pub fn session_try_lock(session_id: &str, owner: &str, force: bool) -> bool {
+    match open_conn() {
+        Ok(conn) => session_try_lock_on(&conn, session_id, owner, force),
+        Err(_) => false,
+    }
+}
+
+/// 释放会话锁。仅锁的持有者可释放（或强制释放）。
+pub fn session_unlock(session_id: &str, owner: &str, force: bool) -> bool {
+    match open_conn() {
+        Ok(conn) => session_unlock_on(&conn, session_id, owner, force),
+        Err(_) => false,
+    }
+}
+
+/// 查询当前锁持有者；未锁定返回 None。
+pub fn session_owner(session_id: &str) -> Option<String> {
+    let Ok(conn) = open_conn() else { return None };
+    session_owner_on(&conn, session_id)
+}
+
+fn session_try_lock_on(conn: &Connection, session_id: &str, owner: &str, force: bool) -> bool {
+    let now = now_ms();
+    let held = session_owner_on(conn, session_id);
+    if let Some(cur) = held {
+        if cur == owner {
+            return true; // 自己已持有
+        }
+        if !force {
+            return false; // 他人持有且不强制
+        }
+    }
+    // 首次占用或强制抢占：upsert owner + locked
+    let _ = conn.execute(
+        "INSERT INTO session_meta (id, source, status, started_ms, owner, locked)
+         VALUES (?1,?2,'active',?3,?2,1)
+         ON CONFLICT(id) DO UPDATE SET owner=excluded.owner, locked=1",
+        rusqlite::params![session_id, owner, now],
+    );
+    session_owner_on(conn, session_id) == Some(owner.to_string())
+}
+
+fn session_unlock_on(conn: &Connection, session_id: &str, owner: &str, force: bool) -> bool {
+    let held = session_owner_on(conn, session_id);
+    match held {
+        None => true,
+        Some(cur) if cur == owner || force => {
+            let _ = conn.execute(
+                "UPDATE session_meta SET locked=0 WHERE id=?1",
+                rusqlite::params![session_id],
+            );
+            true
+        }
+        Some(_) => false,
+    }
+}
+
+fn session_owner_on(conn: &Connection, session_id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT owner FROM session_meta WHERE id=?1 AND locked=1",
+        rusqlite::params![session_id],
+        |r| r.get::<_, Option<String>>(0),
+    )
+    .ok()
+    .flatten()
+}
+
 // ---------- 测试辅助 ----------
 
 #[cfg(test)]
@@ -199,5 +306,47 @@ mod tests {
         // 不改动全局 env（并行测试安全）：只验证默认值是 ASCII 安全的路径形态
         let p = db_path();
         assert!(p.to_string_lossy().ends_with("audit.db"));
+    }
+
+    #[test]
+    fn session_lock_roundtrip() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session_meta (
+                id TEXT PRIMARY KEY, host TEXT, user TEXT, port INTEGER, source TEXT,
+                status TEXT NOT NULL DEFAULT 'active', started_ms INTEGER NOT NULL,
+                ended_ms INTEGER, owner TEXT, locked INTEGER NOT NULL DEFAULT 0)",
+        ).unwrap();
+        let sid = "test_lock_sid";
+        // 首次占用成功
+        assert!(session_try_lock_on(&conn, sid, "human", false));
+        assert_eq!(session_owner_on(&conn, sid).as_deref(), Some("human"));
+        // 他人占用失败（不强制）
+        assert!(!session_try_lock_on(&conn, sid, "agent", false));
+        // 人工强制抢占成功
+        assert!(session_try_lock_on(&conn, sid, "human", true));
+        // 释放
+        assert!(session_unlock_on(&conn, sid, "human", false));
+        assert_eq!(session_owner_on(&conn, sid), None);
+        // 重复释放幂等
+        assert!(session_unlock_on(&conn, sid, "human", false));
+    }
+
+    #[test]
+    fn session_lock_human_priority() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session_meta (
+                id TEXT PRIMARY KEY, host TEXT, user TEXT, port INTEGER, source TEXT,
+                status TEXT NOT NULL DEFAULT 'active', started_ms INTEGER NOT NULL,
+                ended_ms INTEGER, owner TEXT, locked INTEGER NOT NULL DEFAULT 0)",
+        ).unwrap();
+        let sid = "test_lock_priority_sid";
+        assert!(session_try_lock_on(&conn, sid, "agent", false));
+        assert_eq!(session_owner_on(&conn, sid).as_deref(), Some("agent"));
+        // 人工强制抢占（force=true）应成功，即使 agent 持有
+        assert!(session_try_lock_on(&conn, sid, "human", true));
+        assert_eq!(session_owner_on(&conn, sid).as_deref(), Some("human"));
+        let _ = session_unlock_on(&conn, sid, "human", false);
     }
 }

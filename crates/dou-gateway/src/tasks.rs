@@ -18,6 +18,7 @@ pub enum TaskStatus {
     Running,
     Done,
     Failed,
+    Cancelled,
 }
 
 impl TaskStatus {
@@ -29,6 +30,7 @@ impl TaskStatus {
             TaskStatus::Running => "running",
             TaskStatus::Done => "done",
             TaskStatus::Failed => "failed",
+            TaskStatus::Cancelled => "cancelled",
         }
     }
 
@@ -39,6 +41,7 @@ impl TaskStatus {
             "running" => TaskStatus::Running,
             "done" => TaskStatus::Done,
             "failed" => TaskStatus::Failed,
+            "cancelled" => TaskStatus::Cancelled,
             _ => TaskStatus::PendingApproval,
         }
     }
@@ -60,6 +63,12 @@ pub struct Task {
     pub created_ms: u128,
     pub decided_ms: Option<u128>,
     pub done_ms: Option<u128>,
+    /// A4：审批卡片四要素之一，目标路径（exec 为会话，put/get 为远端路径）。
+    pub target_path: String,
+    /// A4：历史同类命令次数（create 时快照，用于「预计影响」提示）。
+    pub history_count: u32,
+    /// A4：预计影响（人话描述，如「修改文件」「删除文件」）。
+    pub impact: String,
 }
 
 pub struct TaskHub {
@@ -80,14 +89,16 @@ fn persist(t: &Task) {
     let _ = conn.execute(
         "INSERT INTO task_state
             (id, session, command, status, reason, approver_note, remember, policy,
-             stdout, stderr, exit_code, created_ms, decided_ms, done_ms)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+             stdout, stderr, exit_code, created_ms, decided_ms, done_ms,
+             target_path, history_count, impact)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
          ON CONFLICT(id) DO UPDATE SET
             status=excluded.status, reason=excluded.reason,
             approver_note=excluded.approver_note, remember=excluded.remember,
             policy=excluded.policy, stdout=excluded.stdout, stderr=excluded.stderr,
             exit_code=excluded.exit_code, decided_ms=excluded.decided_ms,
-            done_ms=excluded.done_ms",
+            done_ms=excluded.done_ms, target_path=excluded.target_path,
+            history_count=excluded.history_count, impact=excluded.impact",
         rusqlite::params![
             t.id, t.session, t.command, t.status.as_str(), t.reason,
             t.approver_note, t.remember as i64, t.policy,
@@ -95,6 +106,7 @@ fn persist(t: &Task) {
             t.created_ms as i64,
             t.decided_ms.map(|v| v as i64),
             t.done_ms.map(|v| v as i64),
+            t.target_path, t.history_count as i64, t.impact,
         ],
     );
 }
@@ -104,7 +116,8 @@ fn load_all() -> Vec<Task> {
     let Ok(conn) = state::open_conn() else { return vec![] };
     let mut stmt = match conn.prepare(
         "SELECT id, session, command, status, reason, approver_note, remember, policy,
-                stdout, stderr, exit_code, created_ms, decided_ms, done_ms
+                stdout, stderr, exit_code, created_ms, decided_ms, done_ms,
+                target_path, history_count, impact
            FROM task_state ORDER BY created_ms",
     ) {
         Ok(s) => s,
@@ -126,6 +139,9 @@ fn load_all() -> Vec<Task> {
             created_ms: r.get::<_, i64>(11)? as u128,
             decided_ms: r.get::<_, Option<i64>>(12)?.map(|v| v as u128),
             done_ms: r.get::<_, Option<i64>>(13)?.map(|v| v as u128),
+            target_path: r.get(14).unwrap_or_default(),
+            history_count: r.get::<_, Option<i64>>(15)?.unwrap_or(0) as u32,
+            impact: r.get(16).unwrap_or_default(),
         })
     });
     match rows {
@@ -143,7 +159,23 @@ impl TaskHub {
     }
 
     pub async fn create_pending(&self, session: &str, command: &str, reason: &str, policy: &str) -> String {
+        self.create_pending_with(session, command, reason, policy, "", "", "").await
+    }
+
+    /// 完整版创建：携带审批卡片四要素（目标路径 / 历史次数 / 预计影响）。
+    pub async fn create_pending_with(
+        &self,
+        session: &str,
+        command: &str,
+        reason: &str,
+        policy: &str,
+        target_path: &str,
+        impact: &str,
+        _extra: &str,
+    ) -> String {
         let id = new_id();
+        // 历史同类次数：同名命令（归一化首段）在库中的出现次数，用于「预计影响」提示。
+        let history_count = Self::count_command_history(command);
         let task = Task {
             id: id.clone(),
             session: session.to_string(),
@@ -159,10 +191,62 @@ impl TaskHub {
             created_ms: now_ms(),
             decided_ms: None,
             done_ms: None,
+            target_path: target_path.to_string(),
+            history_count,
+            impact: impact.to_string(),
         };
         persist(&task);
         self.tasks.lock().await.push(task);
         id
+    }
+
+    /// A3 审批超时：将超过 `timeout_ms` 仍未决的 pending 任务自动置为拒绝。
+    /// 返回本次被超时拒绝的任务数（供调用方写审计）。
+    pub async fn expire_stale_pending(&self, timeout_ms: u128) -> usize {
+        let now = now_ms();
+        let mut tasks = self.tasks.lock().await;
+        let mut expired = 0usize;
+        for t in tasks.iter_mut() {
+            if t.status == TaskStatus::PendingApproval && now.saturating_sub(t.created_ms) > timeout_ms {
+                t.status = TaskStatus::Rejected;
+                t.reason = format!("{}（审批超时自动拒绝）", t.reason.trim_end_matches("（审批超时自动拒绝）"));
+                t.decided_ms = Some(now);
+                persist(t);
+                expired += 1;
+            }
+        }
+        expired
+    }
+
+    /// A2 终止任务：仅 running / pending 可终止；已终态返回 Err。
+    pub async fn cancel(&self, id: &str) -> Result<Option<Task>, String> {
+        let mut tasks = self.tasks.lock().await;
+        let pos = tasks.iter().position(|t| t.id == id).ok_or_else(|| format!("task {id} not found"))?;
+        match tasks[pos].status {
+            TaskStatus::Running | TaskStatus::PendingApproval => {}
+            _ => return Err(format!("task {id} 已终态（{}），不可终止", tasks[pos].status.as_str())),
+        }
+        tasks[pos].status = TaskStatus::Cancelled;
+        tasks[pos].done_ms = Some(now_ms());
+        let snapshot = tasks[pos].clone();
+        persist(&snapshot);
+        Ok(Some(snapshot))
+    }
+
+    /// 查询某命令的历史出现次数（归一化到首命令词）。
+    fn count_command_history(command: &str) -> u32 {
+        let Ok(conn) = state::open_conn() else { return 0 };
+        let head = command.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        if head.is_empty() {
+            return 0;
+        }
+        let mut stmt = match conn.prepare("SELECT COUNT(*) FROM task_state WHERE lower(command) LIKE ?1") {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        stmt.query_row(rusqlite::params![format!("{head}%")], |r| r.get::<_, i64>(0))
+            .map(|n| n as u32)
+            .unwrap_or(0)
     }
 
     pub async fn decide(&self, id: &str, approve: bool, note: &str, remember: bool) -> Result<Option<Task>, String> {
@@ -232,6 +316,9 @@ pub fn task_to_json(t: &Task) -> Value {
         "done_ms": t.done_ms,
         "stdout": t.stdout,
         "stderr": t.stderr,
+        "target_path": t.target_path,
+        "history_count": t.history_count,
+        "impact": t.impact,
     })
 }
 
@@ -248,6 +335,7 @@ mod tests {
             TaskStatus::Running,
             TaskStatus::Done,
             TaskStatus::Failed,
+            TaskStatus::Cancelled,
         ];
         for s in all {
             assert_eq!(TaskStatus::from_str(s.as_str()), s);
@@ -260,5 +348,89 @@ mod tests {
         for _ in 0..500 {
             assert!(seen.insert(new_id()));
         }
+    }
+
+    #[test]
+    fn cancel_only_works_on_active_tasks() {
+        // 用 tokio 运行时驱动 cancel 的状态机
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let hub = TaskHub { tasks: Arc::new(Mutex::new(vec![Task {
+                id: "t1".into(),
+                session: "s".into(),
+                command: "rm -f x".into(),
+                status: TaskStatus::PendingApproval,
+                reason: String::new(),
+                approver_note: String::new(),
+                remember: false,
+                policy: "change".into(),
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                created_ms: 1,
+                decided_ms: None,
+                done_ms: None,
+                target_path: String::new(),
+                history_count: 0,
+                impact: String::new(),
+            }, Task {
+                id: "t2".into(),
+                session: "s".into(),
+                command: "ls".into(),
+                status: TaskStatus::Done,
+                reason: String::new(),
+                approver_note: String::new(),
+                remember: false,
+                policy: "execute".into(),
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: Some(0),
+                created_ms: 1,
+                decided_ms: Some(2),
+                done_ms: Some(3),
+                target_path: String::new(),
+                history_count: 0,
+                impact: String::new(),
+            }])) };
+            // pending 可终止
+            let r = hub.cancel("t1").await.unwrap().unwrap();
+            assert_eq!(r.status, TaskStatus::Cancelled);
+            // 终态不可终止
+            assert!(hub.cancel("t2").await.is_err());
+            // 不存在报错
+            assert!(hub.cancel("nope").await.is_err());
+        });
+    }
+
+    #[test]
+    fn expire_stale_pending_rejects_only_stale() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let hub = TaskHub { tasks: Arc::new(Mutex::new(vec![
+                Task {
+                    id: "old".into(), session: "s".into(), command: "rm x".into(),
+                    status: TaskStatus::PendingApproval, reason: "mutating".into(),
+                    approver_note: String::new(), remember: false, policy: "change".into(),
+                    stdout: String::new(), stderr: String::new(), exit_code: None,
+                    created_ms: 1, decided_ms: None, done_ms: None,
+                    target_path: String::new(), history_count: 0, impact: String::new(),
+                },
+                Task {
+                    id: "fresh".into(), session: "s".into(), command: "rm y".into(),
+                    status: TaskStatus::PendingApproval, reason: "mutating".into(),
+                    approver_note: String::new(), remember: false, policy: "change".into(),
+                    stdout: String::new(), stderr: String::new(), exit_code: None,
+                    created_ms: u128::MAX, decided_ms: None, done_ms: None,
+                    target_path: String::new(), history_count: 0, impact: String::new(),
+                },
+            ])) };
+            let expired = hub.expire_stale_pending(5 * 60 * 1000).await;
+            assert_eq!(expired, 1);
+            let all = hub.list_all().await;
+            let old = all.iter().find(|t| t.id == "old").unwrap();
+            assert_eq!(old.status, TaskStatus::Rejected);
+            let fresh = all.iter().find(|t| t.id == "fresh").unwrap();
+            assert_eq!(fresh.status, TaskStatus::PendingApproval);
+        });
     }
 }
