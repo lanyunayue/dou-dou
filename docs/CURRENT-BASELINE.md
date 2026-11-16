@@ -11,7 +11,7 @@
 
 | 项 | 状态 | 指向 |
 |---|---|---|
-| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `18ff118`（2026-11-16 本会话 D2 覆盖率门槛+useApproval 单测） |
+| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `ad32180`（2026-11-16 本会话 D1 分层重构+依赖检查器） |
 | 网关真源 | ✅ `dou-handover-20261113-2139\dou-workspace`（`crates/dou-gateway`），git 干净 | HEAD `76b8457`（2026-11-16 本会话 B1 私钥本地加密库） |
 | 废弃镜像 | `dou-workspace/app/` 已标 DEPRECATED，不在其上开发 | commit `67be637` |
 | 回滚点 | 🔴 `_backup-20261113-2350`（恢复 git 前快照，207 文件）勿动 | 磁盘体检报告 |
@@ -35,14 +35,14 @@
 
 | 检查 | 命令 | 结果 | 判定 |
 |---|---|---|---|
-| 交接包全量 | `& "C:\Program Files\Git\bin\bash.exe" verify.sh`（在包根目录） | 27 项判据 | ✅ 2026-11-16 复跑：25 PASS + 1 FAIL（rustfmt 回归）→ 修复后 **26 PASS** → 本会话（含 B1/D2 后）**27 PASS / 0 FAIL** |
+| 交接包全量 | `& "C:\Program Files\Git\bin\bash.exe" verify.sh`（在包根目录） | 28 项判据 | ✅ 2026-11-16 复跑：25 PASS + 1 FAIL（rustfmt 回归）→ 修复后 **26 PASS** → B1/D2 后 **27 PASS** → D1 后 **28 PASS / 0 FAIL**（step 10 分层检查并入） |
 | 环境自检 | `powershell -ExecutionPolicy Bypass -File .\scripts\env-check.ps1`（dou-app 内） | 21/21 ALL OK | ✅ 2026-11-14 |
 | 客户端构建 | `cargo build`（dou-app/src-tauri） | 0 error | ✅ 2026-11-16（verify §5） |
 | 客户端单测 | `cargo test --lib` | 11 passed | ✅ 2026-11-16（verify §5） |
 | 客户端静态 | `cargo clippy --all-targets` / `cargo fmt --check` | 0 警告 / 0 差异（fmt 回归已修） | ✅ 2026-11-16 |
 | 网关测试 | `cargo test -p dou-gateway`（本机默认工具链即 GNU） | 50 passed（A5/B2/B3/B1 单测并入） | ✅ 2026-11-16 本会话实测（36→44→50，B1 后 50/50） |
 | 前端类型 | `vue-tsc --noEmit` | 0 error（含 spec 文件） | ✅ 2026-11-16（verify §6，D2 后含 vitest 测试文件） |
-| 前端构建 | `npm run build` | 73 模块 | ✅ 2026-11-14；A4/D2 改动后待复跑 |
+| 前端构建 | `npm run build` | 73 模块 | ✅ 2026-11-16 D1 后复跑通过（`npm run build` 已前置分层检查 check-layers） |
 | 前端单测 | `npm run test`（dou-app） | 12 passed（useApproval 首批） | ✅ 2026-11-16 本会话（verify §9） |
 | 命令契约 | `python tools/verify-invoke.py` | 25 条无缺失 | ✅ 2026-11-16（verify §7） |
 | SSH 主线 | `cargo run --bin dou-ssh-selfcheck` | 10/10（TOFU、公钥认证、分块传输、断点续传、密钥变更拒绝） | ✅ 2026-11-16（verify §8） |
@@ -52,6 +52,13 @@
 
 - rustfmt 回归（`build.rs` 长行，commit 5850289 引入）已修：`cargo fmt --check` → 0 差异。
 - A4 前端「断连置顶 + 人工终止入口」已实现（`useApproval.ts` / `ApprovalPanel.vue`），vue-tsc 与真窗口验证见追记轮次。
+
+### §3 追记（2026-11-16 第三轮：D1 分层重构）
+
+- src 重排为分层结构（git mv 保留历史，commit `3f1ddfc`）：`shared`(types) / `events`(useEventBus) / `adapters`(useGateway 唯一 IPC 出口) / `core`(useSsh/useApproval/useCredentials/useHostKeys/useOnboard/useEditor/useFileTree/useTerminal/useTransferQueue) / `commands`(useRecovery/useShell/useWorkspace) / `views`(App.vue)，components 独立成层。
+- 反向引用构建期可检出（commit `ad32180`）：`tools/check-layers.mjs` 按「只允许向高层依赖」归层检查，链入 `npm run build` 与 verify.sh step 10；自测负例（core→commands）确认 exit 1。
+- 同步项：vitest coverage exclude 改 `src/shared/types.ts`；verify.sh step 9 覆盖率过滤由 `composables` 路径改为 `src/(core|adapters|commands)/`（口径不变，同一批文件）。
+- 复验：vue-tsc 0 error / vitest 12/12 / npm run build 通过 / verify.sh **28 PASS / 0 FAIL**。
 
 ## 4. 功能工单现状（S0→S4 视角，详见 接下来计划-20261115.md §3）
 
@@ -69,7 +76,7 @@
 | B2 指纹变更二次确认 | ✅ 本会话闭环（网关 /hostkey/list+forget + 前端终端/网关两库遗忘 + mismatch 指引） | dou-workspace `1cf8643` + dou-app `4cd89dc` |
 | B3 逃逸加固 | ✅ 本会话提交（SFTP REALPATH 协议级 symlink 真实解析，三通道统一闸门，put 拒写穿） | dou-workspace `16723a9` |
 | D2 覆盖率门槛入脚本 | ✅ 观察期达成（vitest+coverage-v8 已入 verify.sh step 9，WARN 判定；门槛 核心≥70%/全量≥40% 当前 11.1%/11%，未达标不 FAIL） | dou-app `18ff118` |
-| D1 分层目录重构 | ⏸ 未开工（S2 唯一剩余项） | PLAN-V2 W-29 |
+| D1 分层目录重构 | ✅ 本会话提交（分层重排 `3f1ddfc` + 依赖检查器 `ad32180`，反向引用构建期可检出，verify 28 PASS） | dou-app `3f1ddfc`/`ad32180`（tools/check-layers.mjs） |
 | S3 五页面/四态/设计 token/无障碍 | ⏸ 未开工（可与 S2 并行） | PLAN-V2 R2 |
 | S4 打包/内测 | ⏸ 等外部条件（证书/靶机/样本/课题组），不承诺 | 接下来计划 §3 |
 
