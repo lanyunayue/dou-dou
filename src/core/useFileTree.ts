@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { sshArgs, sshError, handleSshFailure } from './useSsh'
+import { sshArgs, sshOfflineReason, audit } from './useSsh'
 import { openRemoteFile } from './useEditor'
 import { useRequestGuard } from './useRequestGuard'
 import { notify } from '../shared/feedback'
@@ -11,6 +11,8 @@ export const cwd = ref('/home/dou')
 export const files = ref<RemoteFile[]>([])
 export const showHidden = ref(false)
 export const fileFilter = ref('')
+// 文件树独立错误态（R3）：不再复用连接级 sshError，避免误盖终端离线层
+export const filesError = ref('')
 
 // 竞态守卫：快速连续切换目录时，先发的慢响应不得覆盖新目录结果
 const loadGuard = useRequestGuard()
@@ -23,16 +25,19 @@ export const visibleFiles = computed(() => files.value.filter(f => {
 
 export async function loadFiles(path: string) {
   const args = sshArgs()
-  if (!args) { sshError.value = '尚未连接远程主机：请先在终端新建连接'; files.value = []; return }
+  if (!args) { filesError.value = '尚未连接远程主机：请先在终端新建连接'; files.value = []; return }
   const id = loadGuard.begin()
   cwd.value = path
   try {
     const list = await invoke<RemoteFile[]>('sftp_list', { ...args, path })
     if (!loadGuard.isCurrent(id)) return
     files.value = list
+    filesError.value = ''
   } catch (e: any) {
     if (!loadGuard.isCurrent(id)) return
-    files.value = []; handleSshFailure(e, '列出远端目录')
+    files.value = []
+    filesError.value = sshOfflineReason(e)
+    audit.value.unshift(`[${new Date().toLocaleTimeString()}] 列出远端目录失败：${filesError.value}`)
   }
 }
 
@@ -49,8 +54,8 @@ export async function downloadCwd() {
     const p = await invoke('sftp_download', { ...args, remote: cwd.value + '/dou_put_test.txt' })
     notify('已下载到: ' + p)
   } catch (e: any) {
-    handleSshFailure(e, '下载')
-    notify('下载失败：' + sshError.value)
+    notify('下载失败：' + sshOfflineReason(e))
+    audit.value.unshift(`[${new Date().toLocaleTimeString()}] 下载失败：${sshOfflineReason(e)}`)
   }
 }
 

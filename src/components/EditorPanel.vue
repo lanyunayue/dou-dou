@@ -54,7 +54,7 @@ watch(editingFile, async (path) => {
   } catch { /* 快照查询失败不打扰编辑主流程 */ }
 })
 
-/** 结果目录在远端靶机上：跳转 = 文件树导航到该目录并回到工作区视图。 */
+/** 结果目录在远程主机上：跳转 = 文件树导航到该目录并回到工作区视图。 */
 function openResult() {
   if (!rerun.value?.result_dir) return
   loadFiles(rerun.value.result_dir)

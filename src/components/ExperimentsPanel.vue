@@ -48,7 +48,7 @@ async function copyText(text: string, label: string) {
   catch { notify('复制失败：剪贴板不可用') }
 }
 
-/** C4 跳转：结果目录在远端靶机 —— 文件树导航过去并切到工作区视图。 */
+/** C4 跳转：结果目录在远程主机上 —— 文件树导航过去并切到工作区视图。 */
 function openResultDir(dir: string) {
   if (!dir) return
   loadFiles(dir)

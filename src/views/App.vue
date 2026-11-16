@@ -6,7 +6,15 @@
         {{ status.running ? '网关 在线' : '网关 离线' }}
       </div>
       <div class="endpoint">{{ status.endpoint }}</div>
-      <div class="conn-hint">{{ connSummary }}</div>
+      <!-- R3：网关状态与远程主机状态拆分各自成行，未连接时给出动作入口 -->
+      <div class="host-status" :class="{ bad: !activeTarget }">
+        <template v-if="activeTarget">远程主机 {{ activeTarget.user }}@{{ activeTarget.host }}（已连接）</template>
+        <template v-else>
+          远程主机：未连接
+          <button class="linklike" type="button" @click="gotoConnect">新建连接</button>
+          <button class="linklike" type="button" @click="openLocal">打开本地 Shell</button>
+        </template>
+      </div>
       <button class="btn" @click="refresh">刷新</button>
       <nav class="nav" aria-label="主导航">
         <div class="nav-group">工作区</div>
@@ -87,7 +95,9 @@ import AuditPanel from '../components/AuditPanel.vue'
 import ExperimentsPanel from '../components/ExperimentsPanel.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 
-import { status, connSummary, refresh } from '../adapters/useGateway'
+import { status, refresh } from '../adapters/useGateway'
+import { activeTarget } from '../core/useSsh'
+import { showConnectForm, openLocalTab } from '../core/useTerminal'
 import { pendingCount, loadTasks, startApprovalPolling } from '../core/useApproval'
 import { loadTokens } from '../core/useCredentials'
 import { loadTq } from '../core/useTransferQueue'
@@ -105,6 +115,10 @@ const view = useNavView
 
 // 审批入口：切视图的同时拉取待审任务
 function openApprove() { view.value = 'approve'; loadTasks() }
+
+// R3 状态区动作：未连接时一键去新建连接 / 开本地 Shell
+function gotoConnect() { view.value = 'term'; showConnectForm.value = true }
+function openLocal() { openLocalTab() }
 
 // ---------- 启动编排 ----------
 // 事件订阅在应用级注册（应用生命周期内常驻），避免跨视图切换丢事件；卸载时统一解绑。

@@ -37,7 +37,7 @@ export interface TerminalTab {
   fit?: FitAddon
   selected?: boolean
   badge?: number
-  /** 本地 Shell 会话（不走 SSH，靶机不可达时也可用） */
+  /** 本地 Shell 会话（不走 SSH，远程主机不可达时也可用） */
   local?: boolean
 }
 

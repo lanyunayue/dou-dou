@@ -147,6 +147,30 @@ html, body {
 .endpoint { font-size: var(--dou-fs-xs); color: var(--dou-dim); margin: 10px 0 6px; word-break: break-all; }
 .conn-hint { font-size: var(--dou-fs-xs); color: var(--dou-dim); margin: 0 0 12px; line-height: 1.6; }
 
+/* R3 状态区：远程主机状态独立成行，未连接时给动作链接而非干巴巴的文案 */
+.host-status {
+  font-size: var(--dou-fs-xs);
+  color: var(--dou-text);
+  margin: 0 0 12px;
+  line-height: 1.8;
+  word-break: break-all;
+}
+.host-status.bad { color: var(--dou-dim); }
+.linklike {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 8px 0 2px;
+  font: inherit;
+  font-size: var(--dou-fs-xs);
+  color: var(--dou-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.linklike:hover { color: var(--dou-accent-strong, var(--dou-accent)); }
+
 /* ---------- 导航 ---------- */
 .nav { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .nav-group {
