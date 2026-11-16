@@ -6,7 +6,7 @@
 
 use rusqlite::{params, Connection};
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     crate::state::now_ms()
 }
 
@@ -184,6 +184,8 @@ pub fn upsert_snapshot(
     result_dir: &str,
 ) -> Result<(), String> {
     let conn = open()?;
+    // id 由调用方带时间戳后缀保证唯一（同指纹重跑各占一行），
+    // 重复实验靠 find_snapshot_by_fp / list_snapshots 聚合发现。
     conn.execute(
         "INSERT INTO snapshot (id, project_id, session_id, command, arg_norm, dataset_path, fingerprint, result_dir, collected_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
@@ -212,6 +214,40 @@ pub fn find_snapshot_by_fp(fingerprint: &str) -> Result<Option<serde_json::Value
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// 快照指纹聚合列表（C4 实验详情/重复指纹提示）：同一指纹多次采集计 runs，
+/// 命令/数据集/结果目录取最新一次采集的值。
+fn list_snapshots_on(conn: &Connection, limit: usize) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.fingerprint, \
+             (SELECT command FROM snapshot c WHERE c.fingerprint = s.fingerprint ORDER BY collected_at DESC LIMIT 1), \
+             (SELECT dataset_path FROM snapshot d WHERE d.fingerprint = s.fingerprint ORDER BY collected_at DESC LIMIT 1), \
+             (SELECT result_dir FROM snapshot r WHERE r.fingerprint = s.fingerprint ORDER BY collected_at DESC LIMIT 1), \
+             MAX(s.collected_at), COUNT(*) \
+             FROM snapshot s GROUP BY s.fingerprint \
+             ORDER BY MAX(s.collected_at) DESC LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![limit as i64], |r| {
+            Ok(serde_json::json!({
+                "fingerprint": r.get::<_, String>(0)?,
+                "command": r.get::<_, String>(1)?,
+                "dataset_path": r.get::<_, String>(2)?,
+                "result_dir": r.get::<_, String>(3)?,
+                "collected_at": r.get::<_, i64>(4)?,
+                "runs": r.get::<_, i64>(5)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn list_snapshots(limit: usize) -> Result<Vec<serde_json::Value>, String> {
+    let conn = open()?;
+    list_snapshots_on(&conn, limit)
 }
 
 // ---------- policy_rule ----------
@@ -293,4 +329,65 @@ pub fn seed_builtin_rules() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn snap_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE snapshot (
+                id TEXT PRIMARY KEY, project_id TEXT, session_id TEXT,
+                command TEXT, arg_norm TEXT, dataset_path TEXT,
+                fingerprint TEXT, result_dir TEXT, collected_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn upsert_snapshot_aggregates_reruns() {
+        // 同一指纹重跑各占一行（id 带时间戳），list_snapshots 聚合出 runs=2，结果目录取最新
+        let conn = Connection::open_in_memory().unwrap();
+        snap_table(&conn);
+        for (i, (dir, at)) in [("/out/run1", 10_i64), ("/out/run2", 20_i64)]
+            .iter()
+            .enumerate()
+        {
+            conn.execute(
+                "INSERT INTO snapshot (id, command, dataset_path, fingerprint, result_dir, collected_at)
+                 VALUES (?1,'python train.py','/data','fp_a',?2,?3)",
+                rusqlite::params![format!("snap_a_{i}"), dir, at],
+            ).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO snapshot (id, command, dataset_path, fingerprint, result_dir, collected_at)
+             VALUES ('snap_b_1','ls /data','/data','fp_b','/out/b1',15)",
+            [],
+        ).unwrap();
+
+        let items = list_snapshots_on(&conn, 10).unwrap();
+        assert_eq!(items.len(), 2);
+        // 最新采集排前
+        assert_eq!(items[0]["fingerprint"], "fp_a");
+        assert_eq!(items[0]["runs"], 2);
+        assert_eq!(items[0]["result_dir"], "/out/run2");
+        assert_eq!(items[1]["runs"], 1);
+    }
+
+    #[test]
+    fn list_snapshots_respects_limit() {
+        let conn = Connection::open_in_memory().unwrap();
+        snap_table(&conn);
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO snapshot (id, command, dataset_path, fingerprint, result_dir, collected_at)
+                 VALUES (?1,'c','/d',?2,'/r',?3)",
+                rusqlite::params![format!("s{i}"), format!("fp{i}"), i],
+            ).unwrap();
+        }
+        assert_eq!(list_snapshots_on(&conn, 3).unwrap().len(), 3);
+        assert_eq!(list_snapshots_on(&conn, 100).unwrap().len(), 5);
+    }
 }

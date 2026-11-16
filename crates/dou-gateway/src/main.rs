@@ -202,6 +202,8 @@ async fn main() {
         .route("/audit/query", get(audit_query))
         .route("/audit/verify", get(audit_verify))
         .route("/audit/export", get(audit_export))
+        .route("/policy/rules", get(policy_rules))
+        .route("/snapshots", get(snapshots_list))
         .route("/tasks", get(tasks_list))
         .route("/approve", axum::routing::post(approve_task))
         .route("/task/cancel", axum::routing::post(cancel_task))
@@ -272,11 +274,12 @@ async fn audit_query(State(st): State<AppState>, uri: axum::http::Uri) -> Respon
         .collect();
     let since = params.get("since_ms").and_then(|s| s.parse::<u64>().ok());
     let source = params.get("source").map(|s| s.as_str());
+    let verdict = params.get("verdict").map(|s| s.as_str());
     let limit = params
         .get("limit")
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(200);
-    let items = audit::query(&st.audit, since, source, limit);
+    let items = audit::query(&st.audit, since, source, verdict, limit);
     let body = serde_json::to_string_pretty(&json!({ "count": items.len(), "items": items }))
         .unwrap_or_default();
     Response::builder()
@@ -376,10 +379,21 @@ async function decide(id, approve) {{
     Html(html)
 }
 
-async fn audit_export(State(st): State<AppState>) -> Response {
-    // CSV 导出：ts, source, action, target, verdict, trace_id
+async fn audit_export(State(st): State<AppState>, uri: axum::http::Uri) -> Response {
+    // CSV 导出：ts, source, action, target, verdict, trace_id。
+    // S3：导出与检索共用同一套过滤参数（since_ms / source / verdict），所见即所得。
+    let params: std::collections::HashMap<String, String> = uri
+        .query()
+        .unwrap_or("")
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let since = params.get("since_ms").and_then(|s| s.parse::<u64>().ok());
+    let source = params.get("source").map(|s| s.as_str());
+    let verdict = params.get("verdict").map(|s| s.as_str());
     let mut csv = String::from("ts_ms,source,action,target,verdict,trace_id\n");
-    let items = audit::tail(&st.audit, 10_000);
+    let items = audit::query(&st.audit, since, source, verdict, 10_000);
     for v in &items {
         let f = |k: &str| {
             v.get(k)
@@ -402,6 +416,44 @@ async fn audit_export(State(st): State<AppState>) -> Response {
         .header("Content-Type", "text/csv; charset=utf-8")
         .header("Content-Disposition", "attachment; filename=dou_audit.csv")
         .body(csv.into())
+        .unwrap()
+}
+
+/// S3 策略配置页：内置规则 + 自定义规则只读列表（改规则走安全流程，不在界面放开写）。
+async fn policy_rules(State(st): State<AppState>) -> Response {
+    let (items, err) = match store::list_rules(None) {
+        Ok(list) => (list, None),
+        Err(e) => (vec![], Some(e)),
+    };
+    let body = serde_json::to_string(&json!({
+        "count": items.len(),
+        "items": items,
+        "error": err,
+    }))
+    .unwrap_or_default();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json; charset=utf-8")
+        .body(body.into())
+        .unwrap()
+}
+
+/// S3 实验详情页：快照指纹聚合（同一实验重跑聚合为 runs，结果目录取最新）。
+async fn snapshots_list(State(st): State<AppState>) -> Response {
+    let (items, err) = match store::list_snapshots(200) {
+        Ok(list) => (list, None),
+        Err(e) => (vec![], Some(e)),
+    };
+    let body = serde_json::to_string(&json!({
+        "count": items.len(),
+        "items": items,
+        "error": err,
+    }))
+    .unwrap_or_default();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json; charset=utf-8")
+        .body(body.into())
         .unwrap()
 }
 

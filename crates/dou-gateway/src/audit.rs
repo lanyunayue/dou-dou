@@ -160,8 +160,14 @@ pub fn tail(path: &Path, n: usize) -> Vec<Value> {
         .collect()
 }
 
-/// 按时间范围与来源检索（计划书 F-27：按项目与时间检索）。
-pub fn query(path: &Path, since_ms: Option<u64>, source: Option<&str>, limit: usize) -> Vec<Value> {
+/// 按时间范围、来源与判定检索（计划书 F-27：按项目与时间检索；S3 审计中心补判定维度）。
+pub fn query(
+    path: &Path,
+    since_ms: Option<u64>,
+    source: Option<&str>,
+    verdict: Option<&str>,
+    limit: usize,
+) -> Vec<Value> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return vec![];
     };
@@ -178,6 +184,11 @@ pub fn query(path: &Path, since_ms: Option<u64>, source: Option<&str>, limit: us
             }
             if let Some(src) = source {
                 if v.get("source").and_then(|x| x.as_str()) != Some(src) {
+                    return false;
+                }
+            }
+            if let Some(vd) = verdict {
+                if v.get("verdict").and_then(|x| x.as_str()) != Some(vd) {
                     return false;
                 }
             }
@@ -247,4 +258,59 @@ pub fn write_sqlite(entry: &Value) {
             entry.get("hash").and_then(|v| v.as_str()).unwrap_or(""),
         ],
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// 直接写原始 JSONL（不走 write()，避免测试期触碰真实 SQLite 审计表）。
+    fn seed(path: &Path, rows: &[(&str, &str, &str)]) {
+        let mut f = std::fs::File::create(path).unwrap();
+        for (i, (src, vd, ts)) in rows.iter().enumerate() {
+            writeln!(
+                f,
+                r#"{{"ts_ms":"{ts}","trace_id":"t{i}","source":"{src}","action":"exec","target":"/tmp/x","verdict":"{vd}","detail":{{}},"prev_hash":"genesis","hash":"h{i}"}}"#
+            ).unwrap();
+        }
+    }
+
+    fn temp_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "dou_audit_q_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn query_filters_by_source_verdict_and_time() {
+        let p = temp_path();
+        seed(
+            &p,
+            &[
+                ("mcp", "allowed", "1000"),
+                ("mcp", "denied", "2000"),
+                ("system", "denied", "3000"),
+            ],
+        );
+        assert_eq!(query(&p, None, None, None, 100).len(), 3);
+        assert_eq!(query(&p, None, Some("mcp"), None, 100).len(), 2);
+        assert_eq!(query(&p, None, None, Some("denied"), 100).len(), 2);
+        assert_eq!(query(&p, None, Some("mcp"), Some("allowed"), 100).len(), 1);
+        // since_ms 过滤：≥2000 的两条
+        assert_eq!(query(&p, Some(2000), None, None, 100).len(), 2);
+        // limit 生效（取最新的 N 条）
+        assert_eq!(query(&p, None, None, None, 1).len(), 1);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn query_missing_file_returns_empty() {
+        assert!(query(&temp_path(), None, None, None, 10).is_empty());
+    }
 }

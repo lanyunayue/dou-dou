@@ -111,7 +111,8 @@ pub fn record(
     // 先查历史（重复实验提示）
     let prior = store::find_snapshot_by_fp(&fp).unwrap_or(None);
 
-    let id = format!("snap_{}", &fp[..12]);
+    // id 带毫秒时间戳后缀：同指纹重跑各占一行，重复实验由 runs 聚合与 prior 查询发现。
+    let id = format!("snap_{}_{}", &fp[..12], store::now_ms());
     store::upsert_snapshot(
         &id,
         project_id,
