@@ -11,29 +11,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$pkgRoot = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
-$mingw = Get-ChildItem -LiteralPath $pkgRoot -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -like "BrechtSanders.WinLibs.POSIX.UCRT_*" } |
-    Select-Object -First 1
-
-if (-not $mingw) {
-    throw "未找到 MinGW (BrechtSanders.WinLibs.POSIX.UCRT)。先执行：winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e --scope user"
+# Resolve MinGW by probing: DOU_MINGW_BIN -> w64devkit -> WinGet package.
+$bin = $env:DOU_MINGW_BIN
+if (-not $bin -or -not (Test-Path -LiteralPath (Join-Path $bin "dlltool.exe"))) {
+    $candidates = @("D:\w64devkit\bin")
+    $pkgRoot = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+    $pkg = Get-ChildItem -LiteralPath $pkgRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "BrechtSanders.WinLibs.POSIX.UCRT_*" } |
+        Select-Object -First 1
+    if ($pkg) { $candidates += (Join-Path $pkg.FullName "mingw64\bin") }
+    foreach ($c in $candidates) {
+        if (Test-Path -LiteralPath (Join-Path $c "dlltool.exe")) { $bin = $c; break }
+    }
 }
+if (-not $bin) { throw "MinGW not found. Set DOU_MINGW_BIN to a bin dir containing dlltool.exe, or install w64devkit." }
 
-$bin = Join-Path $mingw.FullName "mingw64\bin"
-if (-not (Test-Path -LiteralPath (Join-Path $bin "dlltool.exe"))) {
-    throw "MinGW bin 目录缺少 dlltool.exe：$bin"
-}
-
-$env:Path = "$bin;$env:USERPROFILE\.cargo\bin;" + $env:Path
+$cargoBin = if ($env:CARGO_HOME) { Join-Path $env:CARGO_HOME "bin" } else { Join-Path $env:USERPROFILE ".cargo\bin" }
+$env:Path = "$bin;$cargoBin;" + $env:Path
 
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $repo
 
 # ASCII-only target dir: a non-ASCII repo path breaks MinGW dlltool.
-if (-not $env:DOU_TARGET_DIR) { $env:DOU_TARGET_DIR = "E:/dou-target" }
+if (-not $env:DOU_TARGET_DIR) { $env:DOU_TARGET_DIR = "D:/dou-target" }
 $env:CARGO_TARGET_DIR = $env:DOU_TARGET_DIR
-if (-not $env:CARGO_NET_OFFLINE) { $env:CARGO_NET_OFFLINE = "true" }
+# Only force offline when the cache is warm; a fresh machine must fetch crates.
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+$cache = Join-Path $cargoHome "registry\cache"
+if (-not (Test-Path -LiteralPath $cache) -or -not (Get-ChildItem -LiteralPath $cache -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    $env:CARGO_NET_OFFLINE = "false"
+}
 
 # UTF-8 console so Chinese audit text is not garbled by the OEM code page.
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8

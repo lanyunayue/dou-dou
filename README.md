@@ -35,7 +35,7 @@ winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e --scope user --accept-pa
 两个必须知道的坑（详见 `docs/spike-report-001.md`）：
 
 1. MinGW 的 `dlltool.exe` 必须能通过 PATH 找到，否则 `windows-sys` 编译失败。`scripts/build.ps1` 已自动注入。
-2. 项目在中文路径下会让 dlltool 把路径解码成乱码，构建产物因此被指到 `E:/dou-target`（见 `.cargo/config.toml`）。
+2. 项目在中文路径下会让 dlltool 把路径解码成乱码，构建产物因此被指到 `D:/dou-target`（见 `.cargo/config.toml`）。
 
 ## 运行
 
@@ -44,7 +44,7 @@ winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e --scope user --accept-pa
 .\scripts\build.ps1 build
 
 # 启动（默认 127.0.0.1:7419，dev 模式允许本地执行只读命令）
-$env:DOU_DEV_MODE="1"; E:\dou-target\debug\dou-gateway.exe
+$env:DOU_DEV_MODE="1"; D:\dou-target\debug\dou-gateway.exe
 ```
 
 启动后终端会打印一次 `dou_ak_...` 令牌，客户端配置里要用它。
@@ -58,7 +58,7 @@ $env:DOU_SSH     = "dou@127.0.0.1:22"                            # user@host:por
 $env:DOU_SSH_KEY = "$env:LOCALAPPDATA\dou\keys\id_ed25519"       # 优先用密钥
 # 仅临时联调才用口令（与"私钥不出本地"矛盾，正式版会关掉）
 # $env:DOU_SSH_PASS = "..."
-E:\dou-target\debug\dou-gateway.exe
+D:\dou-target\debug\dou-gateway.exe
 ```
 
 成功时启动日志会出现：
@@ -185,7 +185,7 @@ dou/
 
 ```powershell
 .\scripts\gate.ps1
-$env:DOU_DEV_MODE="1"; E:\dou-target\debug\dou-gateway.exe
+$env:DOU_DEV_MODE="1"; D:\dou-target\debug\dou-gateway.exe
 # 另一个终端，令牌从本地 token.txt 获取后注入
 $env:DOU_TOKEN="<运行时令牌>"
 python tools\mcp_probe.py

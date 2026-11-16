@@ -18,13 +18,14 @@ $mingw = Get-ChildItem -LiteralPath $pkgRoot -Directory -ErrorAction SilentlyCon
     Where-Object { $_.Name -like "BrechtSanders.WinLibs.POSIX.UCRT_*" } |
     Select-Object -First 1
 if ($mingw) { $env:Path = (Join-Path $mingw.FullName "mingw64\bin") + ";" + $env:Path }
-$env:Path = (Join-Path $env:USERPROFILE ".cargo\bin") + ";" + $env:Path
+$cargoBin = if ($env:CARGO_HOME) { Join-Path $env:CARGO_HOME "bin" } else { Join-Path $env:USERPROFILE ".cargo\bin" }
+$env:Path = $cargoBin + ";" + $env:Path
 
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $repo
 
 # --- 2. ASCII-only target dir (Chinese path breaks MinGW dlltool) ---
-if (-not $env:DOU_TARGET_DIR) { $env:DOU_TARGET_DIR = "E:/dou-target" }
+if (-not $env:DOU_TARGET_DIR) { $env:DOU_TARGET_DIR = "D:/dou-target" }
 $env:CARGO_TARGET_DIR = $env:DOU_TARGET_DIR
 
 # UTF-8 output for Windows console (GBK otherwise garbles Chinese audit text)
@@ -41,16 +42,16 @@ Get-Process -Name "dou-gateway" -ErrorAction SilentlyContinue | ForEach-Object {
 $failed = @()
 
 Write-Output "=== [1/3] build ($Toolchain) ==="
-& cargo "+$Toolchain" build --offline
+& cargo "+$Toolchain" build
 if ($LASTEXITCODE -ne 0) { $failed += "build" }
 
 Write-Output "=== [2/3] test ($Toolchain) ==="
-& cargo "+$Toolchain" test --offline
+& cargo "+$Toolchain" test
 if ($LASTEXITCODE -ne 0) { $failed += "test" }
 
 if (-not $SkipClippy) {
     Write-Output "=== [3/3] clippy ($Toolchain) ==="
-    & cargo "+$Toolchain" clippy --offline --all-targets
+    & cargo "+$Toolchain" clippy --all-targets
     if ($LASTEXITCODE -ne 0) { $failed += "clippy" }
 }
 

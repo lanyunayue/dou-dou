@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 【历史脚本 / DEPRECATED】v2 是 git 化打包实验版，仍含旧机 /e/ 路径，换机不可直接跑。
+# 现行打包请用同目录 pack-handover.sh（已参数化，支持 DOU_ROOT / DOU_APP_DIR 等覆盖）。
 # 把豆 Dou 项目的全部成果打包成换机可用的压缩包。
 #
 # 【为什么不用 zip -r 直接打整个目录】

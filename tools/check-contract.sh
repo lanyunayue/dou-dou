@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 核对前后端 Tauri 命令契约一致性（供接手体检用）
 set -u
-cd /e/dou-app
-OUT="E:/思考/dou/tools/.contract"
+cd "$(dirname "$0")/../../dou-app"
+OUT="$(dirname "$0")/.contract"
 mkdir -p "$OUT"
 
 # 前端：extract invoke("cmd_name"

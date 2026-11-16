@@ -18,7 +18,10 @@ set -euo pipefail
 HOST="${HOST:?请设置 HOST=Linux靶机地址}"
 PORT="${PORT:-22}"
 LP="${LP:-22}"
-KEY=/c/Users/mrhua/AppData/Local/dou/keys/id_ed25519
+KEY="${DOU_SSH_KEY:-}"
+if [ -z "$KEY" ]; then
+  KEY="$(cygpath -u "${LOCALAPPDATA:?请设置 LOCALAPPDATA}")/dou/keys/id_ed25519"
+fi
 
 if [ ! -f "$KEY" ]; then
   echo "缺失客户端私钥: $KEY"; exit 1

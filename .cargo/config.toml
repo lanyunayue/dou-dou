@@ -1,14 +1,15 @@
-# 本机构建配置（Windows + MinGW）
+# 本机构建配置（Windows + MinGW / w64devkit）
 #
-# 为什么 target-dir 在项目外：项目位于 E:\思考\dou，含中文路径。
-# rustc 传给 dlltool 的参数是 UTF-8，而 MinGW 的 dlltool 按 ANSI 代码页解释，
-# 中文路径会变成 E:\˼�� 导致 “Can't create .lib file”。把产物放到纯 ASCII 路径即可绕开。
+# 为什么 target-dir 在项目外：MinGW 的 dlltool 按 ANSI 代码页解释路径，
+# 含中文的项目路径会变成乱码导致 "Can't create .lib file"。放到纯 ASCII
+# 路径即可绕开。所有产物统一落 D 盘，避免占用 C 盘（本机 C 盘余量偏紧）。
 #
-# 换机器时需要改 linker/ar 的绝对路径，或改用 MSVC 工具链（官方推荐，无此问题）。
+# 换机时只需改下面两个绝对路径，或设置环境变量 CARGO_TARGET_DIR /
+# DOU_MINGW_BIN 覆盖；不要再写死任何用户名。
 
 [build]
-target-dir = "E:/dou-target"
+target-dir = "D:/dou-target"
 
 [target.x86_64-pc-windows-gnu]
-linker = "C:/Users/mrhua/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/x86_64-w64-mingw32-gcc.exe"
-ar = "C:/Users/mrhua/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/ar.exe"
+linker = "D:/w64devkit/bin/x86_64-w64-mingw32-gcc.exe"
+ar = "D:/w64devkit/bin/ar.exe"

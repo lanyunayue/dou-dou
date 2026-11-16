@@ -2,20 +2,31 @@
 # 把豆 Dou 项目的全部成果打包成换机可用的压缩包。
 #
 # 设计要点：
-#   1. 含完整 .git —— 保留全部提交历史、分支、tag（handover-baseline），
+#   1. 含完整 git 历史（history.bundle）—— 保留提交历史、分支、tag（handover-baseline），
 #      换机后 git log / git revert / git branch 全部照常可用。
 #   2. 排除 node_modules / target / dist —— 这些能用 lock 文件一键重建，
 #      带上会臃肿几百 MB 且可能跨机路径失效。
 #   3. 排除全部敏感文件 —— 凭据不进包（W-03 红线）。
 #   4. 附带换机重建指引与验证脚本。
+#
+# 换机路径：默认以「本脚本所在 tools/ 目录的上两级」为交接包根，
+# 可用 DOU_ROOT / DOU_APP_DIR / DOU_WS_DIR / DOU_OUT_DIR 覆盖，不再钉死盘符。
 set -euo pipefail
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="${DOU_ROOT:-$(cd "$HERE/../.." && pwd)}"
+APP_DIR="${DOU_APP_DIR:-$ROOT/dou-app}"
+WS_DIR="${DOU_WS_DIR:-$ROOT/dou-workspace}"
+OUT_DIR="${DOU_OUT_DIR:-$(cd "$ROOT/.." && pwd)/dou-handover}"
+
 STAMP="$(date +%Y%m%d-%H%M)"
-OUT_DIR="/e/dou-handover"
 OUT="$OUT_DIR/dou-handover-$STAMP.zip"
 STAGE="$OUT_DIR/.stage-$STAMP"
 
 echo "[pack] 输出: $OUT"
+echo "[pack] 客户端: $APP_DIR"
+echo "[pack] 主仓库: $WS_DIR"
+mkdir -p "$OUT_DIR"
 rm -rf "$STAGE"; mkdir -p "$STAGE/dou-app" "$STAGE/dou-workspace"
 
 # ---------- 排除规则 ----------
@@ -43,14 +54,14 @@ EXCLUDES=(
   "*.swp" "*~" "*.log" "*/.idea/*"
 )
 
-# ---------- 1. 客户端仓库 E:/dou-app ----------
-echo "[pack] 收集客户端仓库 E:/dou-app ..."
-( cd /e/dou-app && zip -r -q "$STAGE/dou-app.zip" . -x "${EXCLUDES[@]}" )
+# ---------- 1. 客户端仓库 ----------
+echo "[pack] 收集客户端仓库 dou-app ..."
+( cd "$APP_DIR" && zip -r -q "$STAGE/dou-app.zip" . -x "${EXCLUDES[@]}" )
 ( cd "$STAGE" && unzip -q dou-app.zip -d dou-app && rm dou-app.zip )
 
-# ---------- 2. 主仓库 E:/思考/dou ----------
-echo "[pack] 收集主仓库 E:/思考/dou ..."
-( cd /e/思考/dou && zip -r -q "$STAGE/dou-workspace.zip" . -x "${EXCLUDES[@]}" )
+# ---------- 2. 主仓库 ----------
+echo "[pack] 收集主仓库 dou-workspace ..."
+( cd "$WS_DIR" && zip -r -q "$STAGE/dou-workspace.zip" . -x "${EXCLUDES[@]}" )
 ( cd "$STAGE" && unzip -q dou-workspace.zip -d dou-workspace && rm dou-workspace.zip )
 
 # ---------- 3. 清单 ----------
@@ -59,22 +70,23 @@ cat > "$STAGE/MANIFEST.txt" <<EOF
 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
 
 【包含内容】
-1. dou-app/          桌面客户端（Tauri 2 + Vue 3 + Rust），含完整 .git
-2. dou-workspace/    主仓库（网关 crates/dou-gateway + 交接文档 docs/handover + 工具 tools），含完整 .git
+1. dou-app/          桌面客户端（Tauri 2 + Vue 3 + Rust），含 history.bundle
+2. dou-workspace/    主仓库（网关 crates/dou-gateway + 交接文档 docs/handover + 工具 tools），含 history.bundle
 3. MANIFEST.txt      本清单
 4. 新机重建指南.md    换机后如何恢复开发环境
 5. verify.sh         一键验证脚本（构建 / 测试 / 契约核对）
 
 【git 历史】
-两个目录都含完整 .git，全部提交、分支、tag 均保留：
+两个目录都含 history.bundle，全部提交、分支、tag 均保留：
   - dou-app:       main / fix/vault-security / refactor/frontend-components /
                    chore/cleanup-deadcode-fmt，tag handover-baseline
   - dou-workspace: main，tag handover-baseline
-换机后 git log / git revert / git checkout -b 全部照常可用。
+换机后 git init && git fetch history.bundle 'refs/*:refs/*' && git checkout -f main
+即可恢复 git log / git revert / git checkout -b。
 
 【已排除（可一键重建）】
   node_modules/  →  npm ci
-  target/        →  cargo build --offline
+  target/        →  cargo build
   dist/          →  npm run build
   src-tauri/gen/ →  cargo 自动生成
 

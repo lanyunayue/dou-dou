@@ -14,13 +14,27 @@ here="$(cd "$(dirname "$0")" && pwd)"
 APP="$here/dou-app"
 WS="$here/dou-workspace"
 
+# 只有 cargo 缓存已预热时才加 --offline。新机缓存为空却强制离线会直接 FAIL，
+# 这是脚本问题不是代码问题：先联网跑一次 cargo build/fetch 预热即可。
+CARGO_DIR="${CARGO_HOME:-$USERPROFILE/.cargo}"
+if [ -d "$CARGO_DIR/registry/cache" ] && [ -n "$(ls -A "$CARGO_DIR/registry/cache" 2>/dev/null)" ]; then
+  OFFLINE="--offline"
+  say "  [INFO] cargo 缓存已就绪，使用 --offline"
+else
+  OFFLINE=""
+  say "  [INFO] cargo 缓存为空，本次验证联网拉依赖"
+fi
+
 step "0. 目录完整性"
 for d in "$APP" "$WS"; do
   if [ -d "$d" ]; then ok "$(basename "$d")/ 存在"; else bad "$(basename "$d")/ 缺失"; fi
 done
-for f in MANIFEST.txt "新机重建指南.md"; do
-  if [ -f "$here/$f" ]; then ok "$f 存在"; else bad "$f 缺失"; fi
-done
+[ -f "$here/MANIFEST.txt" ] && ok "MANIFEST.txt 存在" || bad "MANIFEST.txt 缺失"
+if [ -f "$here/新机重建指南.md" ] || [ -f "$WS/tools/新机重建指南.md" ]; then
+  ok "新机重建指南.md 存在"
+else
+  bad "新机重建指南.md 缺失"
+fi
 
 step "1. git 历史完整性"
 # 仓库可能是两种形态：
@@ -82,20 +96,19 @@ if command -v node >/dev/null 2>&1; then ok "node: $(node --version)"; else bad 
 
 step "5. Rust 构建与测试"
 if [ -d "$APP/src-tauri" ]; then
-  ( cd "$APP/src-tauri" && cargo build --offline >/tmp/v_build.log 2>&1 )
-  rc=$?
+  ( cd "$APP/src-tauri" && cargo build $OFFLINE >/tmp/v_build.log 2>&1 )
   # 判定标准是「有无编译错误」，而非退出码：新机首次编译全部依赖耗时很长，
   # 若被外部超时打断会返回非 0 但日志里并无 error。
   if grep -qE "^error(\[|:)" /tmp/v_build.log; then
     bad "cargo build 有编译错误"
     grep -E "^error(\[|:)" /tmp/v_build.log | head -8 | sed 's/^/      /'
   elif grep -q "Finished" /tmp/v_build.log; then
-    ok "cargo build --offline 通过"
+    ok "cargo build 通过"
   else
     printf '  [INFO] cargo build 未跑完（首次编译依赖耗时长），但无编译错误\n'
   fi
 
-  ( cd "$APP/src-tauri" && cargo test --offline --lib >/tmp/v_test.log 2>&1 )
+  ( cd "$APP/src-tauri" && cargo test $OFFLINE --lib >/tmp/v_test.log 2>&1 )
   if [ $? -eq 0 ]; then
     r=$(grep -oE "test result: ok\. [0-9]+ passed" /tmp/v_test.log | head -1)
     ok "cargo test --lib 通过 ${r}"
@@ -106,7 +119,7 @@ if [ -d "$APP/src-tauri" ]; then
   ( cd "$APP/src-tauri" && cargo fmt --check >/tmp/v_fmt.log 2>&1 )
   if [ $? -eq 0 ]; then ok "cargo fmt --check 0 差异"; else bad "格式不一致（$(grep -c '^Diff in' /tmp/v_fmt.log) 处）"; fi
 
-  ( cd "$APP/src-tauri" && cargo clippy --offline --all-targets >/tmp/v_clippy.log 2>&1 )
+  ( cd "$APP/src-tauri" && cargo clippy $OFFLINE --all-targets >/tmp/v_clippy.log 2>&1 )
   w=$(grep -cE "^(warning|error): " /tmp/v_clippy.log || true)
   if [ "$w" -le 1 ]; then ok "cargo clippy 警告数 = $w"; else bad "clippy 警告数 = $w"; grep -E "^(warning|error): " /tmp/v_clippy.log | head -5 | sed 's/^/      /'; fi
 else
@@ -122,17 +135,17 @@ else
 fi
 
 step "7. 前后端命令契约"
-if [ -f "$WS/tools/verify-invoke.py" ]; then
+if [ -f "$WS/tools/verify-invoke.py" ] && command -v python >/dev/null 2>&1; then
   out=$(cd "$APP" && python "$WS/tools/verify-invoke.py" 2>&1)
   miss=$(printf '%s' "$out" | grep "缺失(基线有/现无)" | sed 's/.*: //')
   if [ -z "$miss" ] || [ "$miss" = "无" ]; then ok "前端 invoke 命令无缺失"; else bad "缺失命令: $miss"; fi
 else
-  printf '  [SKIP] 未找到 verify-invoke.py\n'
+  printf '  [SKIP] 未找到 verify-invoke.py 或 python 不在 PATH\n'
 fi
 
 step "8. 回环自校验（SSH 靶机，10 项）"
 if [ -d "$WS/tools/ssh-loopback" ]; then
-  ( cd "$WS/tools/ssh-loopback" && cargo run --offline --bin dou-ssh-selfcheck >/tmp/v_selfcheck.log 2>&1 )
+  ( cd "$WS/tools/ssh-loopback" && cargo run $OFFLINE --bin dou-ssh-selfcheck >/tmp/v_selfcheck.log 2>&1 )
   if [ $? -eq 0 ]; then
     ok "回环自校验全通过"
     grep -E "总计" /tmp/v_selfcheck.log | sed 's/^/      /'

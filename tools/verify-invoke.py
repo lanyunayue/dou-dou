@@ -1,20 +1,37 @@
+"""核对前端 invoke() 调用集与 24 条基线命令是否一致。
+
+用法（在 dou-app/ 下执行）：
+    python ../dou-workspace/tools/verify-invoke.py
+    python ../dou-workspace/tools/verify-invoke.py D:/path/to/dou-app/src
+
+不再硬编码任何机器的盘符：默认扫当前目录的 src/，也可传入路径覆盖。
+"""
 import pathlib, re, sys
 
-root = pathlib.Path("E:/dou-app/src")
+root = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path("src")
+if not root.is_dir():
+    print(f"[ERROR] 扫描目录不存在: {root.resolve()}")
+    print("请在 dou-app/ 下执行，或把 src/ 的绝对路径作为参数传入。")
+    sys.exit(2)
+
 pat = re.compile(r'invoke(?:<[^>]*>)?\(\s*["\']([a-z_0-9]+)["\']')
 found = {}
-for p in root.rglob("*"):
+for p in sorted(root.rglob("*")):
     if p.suffix in (".vue", ".ts"):
         txt = p.read_text(encoding="utf-8")
         for m in pat.finditer(txt):
             found.setdefault(m.group(1), []).append(f"{p.name}:{txt[:m.start()].count(chr(10))+1}")
 
+# 基线 25 条：11-13 前端重构新增 vault_test_connect（保险库解锁态连接自测），
+# Rust 侧 lib.rs 的 #[tauri::command] fn vault_test_connect 同步存在，属正常新增。
+# 注：generate_handler![] 注册 27 个命令，其中部分是前端未直接调用的，口径不同。
 base = set("""gateway_request gateway_status gateway_token host_key_forget host_key_list
 open_pty pty_write remote_stat sftp_download sftp_list sync_folders tq_cancel tq_clear
 tq_enqueue tq_list tq_pause tq_resume vault_add_target vault_get_key vault_init
-vault_list_targets vault_lock vault_remove_target vault_unlock""".split())
+vault_list_targets vault_lock vault_remove_target vault_test_connect vault_unlock""".split())
 
 cur = set(found)
+print(f"扫描目录: {root.resolve()}")
 print(f"扫描到唯一命令数: {len(cur)}")
 print(f"基线命令数: {len(base)}")
 print()
@@ -26,3 +43,4 @@ for k in sorted(found):
     print(f"  {k:<22} {len(found[k])}x  {', '.join(found[k])}")
 print()
 print("结论:", "✅ 完全一致" if base == cur else "❌ 有差异")
+sys.exit(0 if base == cur else 1)
