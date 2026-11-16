@@ -33,6 +33,9 @@ target/
 # 交接用 git 历史打包，非源码，不入库
 history.bundle
 
+# D2 覆盖率产物（每次测试重新生成）
+coverage/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

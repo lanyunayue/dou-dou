@@ -17,10 +17,10 @@ export const gwDisconnected = ref(false)
 let outageSinceMs: number | null = null
 const orphanIds = new Set<string>()
 
-function classifyOrphans() {
+function classifyOrphans(outageMs: number | null) {
   for (const t of pendingTasks.value) {
     if (t.created_ms < appStartMs) orphanIds.add(t.id)
-    if (outageSinceMs !== null && t.created_ms <= outageSinceMs) orphanIds.add(t.id)
+    if (outageMs !== null && t.created_ms <= outageMs) orphanIds.add(t.id)
   }
 }
 
@@ -38,11 +38,15 @@ export async function loadTasks() {
     const j = await r.json()
     pendingTasks.value = (j.items || []).filter((t: any) => t.status === 'pending_approval')
     if (outageSinceMs !== null) {
-      // 本轮传输成功 = 连接恢复；失联开始前已挂起的任务保持「已断开」标注
+      // 本轮传输成功 = 连接恢复；失联开始时间先捕获再重置，
+      // 否则失联窗口判定（规则 2）在恢复轮永远不生效。
+      const recoveredMs = outageSinceMs
       outageSinceMs = null
       gwDisconnected.value = false
+      classifyOrphans(recoveredMs)
+    } else {
+      classifyOrphans(null)
     }
-    classifyOrphans()
   } catch {
     if (outageSinceMs === null) outageSinceMs = Date.now()
     gwDisconnected.value = true
