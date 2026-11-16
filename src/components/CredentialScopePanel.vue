@@ -12,7 +12,7 @@
       <input v-model="issueClient" class="filter" placeholder="client_id" />
       <button class="btn" @click="issueToken">签发令牌</button>
     </div>
-    <div v-if="issueTier==='change'" class="hint" style="color:#e0a050">变更档为高风险档位：审批不可关闭，每个动作都需逐条人工确认，不可“任务内记住放行”。</div>
+    <div v-if="issueTier==='change'" class="hint warn-text">变更档为高风险档位：审批不可关闭，每个动作都需逐条人工确认，不可“任务内记住放行”。</div>
     <div v-if="issuedToken" class="issued">
       明文仅显示一次：<span class="mono">{{ issuedToken }}</span>
       <button class="mini-btn" @click="copyIssued">复制</button>

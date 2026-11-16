@@ -8,16 +8,16 @@
       <div class="endpoint">{{ status.endpoint }}</div>
       <div class="conn-hint">{{ connSummary }}</div>
       <button class="btn" @click="refresh">刷新</button>
-      <nav class="nav">
-        <div v-for="n in navs" :key="n.key" class="nav-item" :class="{active: view===n.key}" @click="view=n.key">{{n.label}}</div>
-        <div class="nav-item" :class="{active: view==='onboard'}" @click="view='onboard'">🔌 接入向导</div>
-        <div class="nav-item" :class="{active: view==='approve'}" @click="openApprove">✅ 审批<span v-if="pendingCount" class="badge">{{pendingCount}}</span></div>
-        <div class="nav-item" :class="{active: view==='scope'}" @click="view='scope'; loadTokens()">🔑 凭据与作用域</div>
-        <div class="nav-item" :class="{active: view==='transfer'}" @click="view='transfer'; loadTq()">📤 传输队列</div>
-        <div class="nav-item" :class="{active: view==='vault'}" @click="view='vault'; vaultList()">🔐 凭据保险库</div>
-        <div class="nav-item" :class="{active: view==='hostkeys'}" @click="view='hostkeys'; loadHostKeys(); loadGatewayHostKeys()">🛡 主机密钥</div>
-        <div class="nav-item" @click="importMoba">📥 导入 MobaXterm</div>
-        <div class="nav-item" @click="snapshot">📸 快照</div>
+      <nav class="nav" aria-label="主导航">
+        <button v-for="n in navs" :key="n.key" type="button" class="nav-item" :class="{active: view===n.key}" :aria-current="view===n.key ? 'page' : undefined" @click="view=n.key">{{n.label}}</button>
+        <button type="button" class="nav-item" :class="{active: view==='onboard'}" :aria-current="view==='onboard' ? 'page' : undefined" @click="view='onboard'">🔌 接入向导</button>
+        <button type="button" class="nav-item" :class="{active: view==='approve'}" :aria-current="view==='approve' ? 'page' : undefined" @click="openApprove">✅ 审批<span v-if="pendingCount" class="badge">{{pendingCount}}</span></button>
+        <button type="button" class="nav-item" :class="{active: view==='scope'}" :aria-current="view==='scope' ? 'page' : undefined" @click="view='scope'; loadTokens()">🔑 凭据与作用域</button>
+        <button type="button" class="nav-item" :class="{active: view==='transfer'}" :aria-current="view==='transfer' ? 'page' : undefined" @click="view='transfer'; loadTq()">📤 传输队列</button>
+        <button type="button" class="nav-item" :class="{active: view==='vault'}" :aria-current="view==='vault' ? 'page' : undefined" @click="view='vault'; vaultList()">🔐 凭据保险库</button>
+        <button type="button" class="nav-item" :class="{active: view==='hostkeys'}" :aria-current="view==='hostkeys' ? 'page' : undefined" @click="view='hostkeys'; loadHostKeys(); loadGatewayHostKeys()">🛡 主机密钥</button>
+        <button type="button" class="nav-item" @click="importMoba">📥 导入 MobaXterm</button>
+        <button type="button" class="nav-item" @click="snapshot">📸 快照</button>
       </nav>
     </aside>
     <div class="workspace">
@@ -53,7 +53,7 @@
           <span class="hint">首次需初始化；之后用主密码解锁。锁定时清除内存密钥；私钥明文不落盘，用后即清。</span>
         </div>
         <div v-else class="row">
-          <span class="hint" style="color:#166534">已解锁</span>
+          <span class="hint ok-text">已解锁</span>
           <button class="btn bad" @click="vaultLock">锁定</button>
         </div>
         <div v-if="vaultUnlocked" class="wizard">

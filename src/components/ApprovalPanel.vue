@@ -37,9 +37,9 @@ const orphanCount = computed(() => pendingTasksView.value.filter(t => t.orphaned
 
 <style scoped>
 .approve-card .meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
-.approve-card .meta span { color: var(--color-text-secondary, #6b6b64); }
-.approve-card.orphan { border-left: 3px solid #d97706; }
-.orphan-banner { margin: 8px 10px 0; padding: 8px 10px; font-size: 12px; border: 1px solid #d97706; background: #fffbeb; color: #92400e; border-radius: 4px; }
-.orphan-banner.live { border-color: #b91c1c; background: #fef2f2; color: #991b1b; }
-.orphan-badge { display: inline-block; margin-bottom: 4px; padding: 1px 6px; font-size: 10px; color: #92400e; background: #fef3c7; border: 1px solid #d97706; border-radius: 8px; }
+.approve-card .meta span { color: var(--dou-dim); }
+.approve-card.orphan { border-left: 3px solid var(--dou-warn); }
+.orphan-banner { margin: 8px 10px 0; padding: 8px 10px; font-size: var(--dou-fs-xs); border: 1px solid var(--dou-warn); background: var(--dou-warn-bg); color: var(--dou-warn-text); border-radius: var(--dou-radius-sm); }
+.orphan-banner.live { border-color: var(--dou-danger); background: var(--dou-danger-bg); color: var(--dou-danger-text); }
+.orphan-badge { display: inline-block; margin-bottom: 4px; padding: 1px 6px; font-size: var(--dou-fs-xs); color: var(--dou-warn-text); background: var(--dou-warn-bg); border: 1px solid var(--dou-warn); border-radius: 8px; }
 </style>
