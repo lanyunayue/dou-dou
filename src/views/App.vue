@@ -94,6 +94,7 @@ import { loadTq } from '../core/useTransferQueue'
 import { loadHostKeys, loadGatewayHostKeys } from '../core/useHostKeys'
 import { fetchOnboard } from '../core/useOnboard'
 import { newTab, registerTerminalListener, registerWindowFocusListener } from '../core/useTerminal'
+import { registerMonitorListener } from '../core/useMonitor'
 import { registerTqListener } from '../core/useTransferQueue'
 import { registerHostKeyListener } from '../core/useHostKeys'
 import { loadFiles } from '../core/useFileTree'
@@ -116,6 +117,7 @@ onMounted(async () => {
   await refresh()
   unlisteners.push(await registerWindowFocusListener())
   unlisteners.push(await registerTerminalListener())
+  unlisteners.push(...await registerMonitorListener())
   unlisteners.push(await registerHostKeyListener())
   unlisteners.push(await registerTqListener())
 

@@ -7,9 +7,30 @@
         {{t.title}}<span v-if="t.badge" class="badge">{{t.badge}}</span>
         <span class="close" @click.stop="closeTab(t.sid)">×</span>
       </div>
-      <button class="tabadd" @click="newTab">+</button>
+      <button class="tabadd" @click="newTab" title="新建 SSH 会话">+</button>
+      <button class="mini-btn" @click="openLocalTab" title="本地 PowerShell（无需靶机）">本地 Shell</button>
+      <!-- 认证方式（学 MobaXterm）：密码模式连接时输入，仅驻留内存 -->
+      <select v-model="authMode" class="auth-select" aria-label="SSH 认证方式">
+        <option value="key">密钥认证</option>
+        <option value="password">密码认证</option>
+      </select>
+      <input v-if="authMode==='password'" v-model="sshPassword" type="password" class="filter pw-input"
+             placeholder="SSH 密码（仅内存，不落盘）" aria-label="SSH 密码" autocomplete="off" />
       <button class="mini-btn" @click="exportTerm">导出</button>
       <input v-model="broadcast" class="broadcast" placeholder="广播到勾选→" @keyup.enter="doBroadcast" />
+    </div>
+    <!-- 主机监控条（学 MobaXterm 的服务器监控）：host_stats 事件驱动，会话断开自动隐藏 -->
+    <div v-if="hostStats" class="hostbar" role="status" aria-label="主机监控">
+      <span class="hb-item">
+        CPU {{ Math.round(hostStats.cpu_pct) }}%
+        <span class="hb-meter"><span class="hb-fill" :class="meterClass(hostStats.cpu_pct)" :style="{ width: hostStats.cpu_pct + '%' }"></span></span>
+      </span>
+      <span class="hb-item">
+        内存 {{ hostStats.mem_used_mb }}/{{ hostStats.mem_total_mb }} MB
+        <span class="hb-meter"><span class="hb-fill" :class="meterClass(memPct)" :style="{ width: memPct + '%' }"></span></span>
+      </span>
+      <span class="hb-item">↓ {{ fmtKbps(hostStats.rx_kbps) }} · ↑ {{ fmtKbps(hostStats.tx_kbps) }}</span>
+      <span class="hb-item hb-dim">已运行 {{ fmtUptime(hostStats.uptime_s) }}</span>
     </div>
     <div class="term-wrap">
       <div :ref="setTermEl" class="terminal"></div>
@@ -20,16 +41,72 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import OfflineState from './OfflineState.vue'
 import {
   termEl, activeSid, sessionFilter, broadcast, visibleTabs,
-  newTab, switchTab, closeTab, exportTerm, doBroadcast,
+  newTab, openLocalTab, switchTab, closeTab, exportTerm, doBroadcast,
 } from '../core/useTerminal'
-import { sshError } from '../core/useSsh'
+import { authMode, sshPassword, sshError } from '../core/useSsh'
+import { hostStats } from '../core/useMonitor'
 import 'xterm/css/xterm.css'
 
 // 终端 DOM 挂载点：xterm 需要真实节点才能 open()，这里把节点交给终端 composable
 function setTermEl(el: unknown) {
   termEl.value = (el as HTMLDivElement | null) ?? undefined
 }
+
+// 监控条展示：内存占比与分档色（<60 正常 / 60-85 偏高 / ≥85 告警）
+const memPct = computed(() =>
+  hostStats.value ? Math.round(hostStats.value.mem_used_mb / Math.max(hostStats.value.mem_total_mb, 1) * 100) : 0
+)
+function meterClass(v: number) { return v >= 85 ? 'hot' : v >= 60 ? 'warm' : '' }
+function fmtKbps(k: number) { return k >= 1024 ? (k / 1024).toFixed(1) + 'MB/s' : k.toFixed(1) + 'KB/s' }
+function fmtUptime(s: number) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60)
+  return h ? `${h}h${m}m` : `${m}m`
+}
 </script>
+
+<style scoped>
+.auth-select {
+  height: 26px;
+  background: var(--dou-panel);
+  color: var(--dou-text);
+  border: 1px solid var(--dou-border);
+  border-radius: var(--dou-radius-sm, 4px);
+  font-size: 12px;
+  padding: 0 4px;
+}
+.pw-input { width: 190px; }
+.hostbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  background: var(--dou-panel-alt);
+  border-bottom: 1px solid var(--dou-border);
+  font-size: 12px;
+  color: var(--dou-text);
+}
+.hb-item { display: inline-flex; align-items: center; gap: 6px; }
+.hb-dim { color: var(--dou-dim); margin-left: auto; }
+.hb-meter {
+  width: 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--dou-border);
+  overflow: hidden;
+  display: inline-block;
+}
+.hb-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--dou-accent);
+  transition: width 200ms ease;
+}
+.hb-fill.warm { background: var(--dou-warn); }
+.hb-fill.hot { background: var(--dou-danger); }
+</style>

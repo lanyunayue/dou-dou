@@ -48,7 +48,11 @@ pub struct VaultTarget {
     pub host: String,
     pub port: u16,
     pub user: String,
-    /// 加密后的私钥（base64），仅解锁后可解密
+    /// 认证方式：`"key"`（公钥，默认）/ `"password"`（密码，连接时临时输入）。
+    /// `serde(default)` 兼容旧版保险库（无该字段 = 密钥模式）。
+    #[serde(default)]
+    pub auth: String,
+    /// 加密后的私钥（base64），仅解锁后可解密；密码模式目标为 None。
     pub enc_key: Option<String>,
     pub nonce: Option<String>,
 }
@@ -424,6 +428,7 @@ pub fn vault_add_target(
     host: String,
     port: u16,
     user: String,
+    auth: String,
     key_path: String,
 ) -> Result<(), String> {
     let key = state
@@ -432,19 +437,34 @@ pub fn vault_add_target(
         .unwrap()
         .clone()
         .ok_or_else(|| String::from("保险库已锁定，请先解锁"))?;
-    // 明文私钥只在内存中短暂存在，加密后立即清零。
-    let plaintext = Zeroizing::new(std::fs::read(&key_path).map_err(|e| format!("读取私钥: {e}"))?);
-    let (enc, nonce) = aes_encrypt(&key, &plaintext)?;
     let mut vf = read_vault(&state.path).map_err(|e| load_err_msg(&state.path, &e))?;
     vf.targets.retain(|t| t.name != name);
-    vf.targets.push(VaultTarget {
-        name,
-        host,
-        port,
-        user,
-        enc_key: Some(b64_encode(&enc)),
-        nonce: Some(b64_encode(&nonce)),
-    });
+    if auth == "password" {
+        // 密码模式：密码**不入库**（连接时临时输入，内存驻留用完即弃），目标只存地址与认证方式。
+        vf.targets.push(VaultTarget {
+            name,
+            host,
+            port,
+            user,
+            auth,
+            enc_key: None,
+            nonce: None,
+        });
+    } else {
+        // 明文私钥只在内存中短暂存在，加密后立即清零。
+        let plaintext =
+            Zeroizing::new(std::fs::read(&key_path).map_err(|e| format!("读取私钥: {e}"))?);
+        let (enc, nonce) = aes_encrypt(&key, &plaintext)?;
+        vf.targets.push(VaultTarget {
+            name,
+            host,
+            port,
+            user,
+            auth,
+            enc_key: Some(b64_encode(&enc)),
+            nonce: Some(b64_encode(&nonce)),
+        });
+    }
     write_vault(&state.path, &vf)?;
     Ok(())
 }
@@ -471,6 +491,10 @@ fn get_key_info(st: &VaultState, name: &str) -> Result<VaultKeyInfo, String> {
         .iter()
         .find(|t| t.name == name)
         .ok_or_else(|| String::from("目标不存在"))?;
+    // 密码模式目标没有私钥，提前给出明确语义。
+    if t.enc_key.is_none() {
+        return Err(String::from("密码认证目标无私钥（连接时输入密码）"));
+    }
     // 明文私钥：解密 → 解析 → 立刻清零，全程不落盘。
     let plain = Zeroizing::new(decrypt_target_key(&master_key, t)?);
     let key = parse_private_key(&plain)?;
@@ -488,6 +512,7 @@ pub async fn vault_test_connect(
     app: AppHandle,
     state: State<'_, VaultState>,
     name: String,
+    password: Option<String>,
 ) -> Result<String, String> {
     let st = state.inner();
     ensure_unlocked(*st.unlocked.lock().unwrap())?;
@@ -504,6 +529,19 @@ pub async fn vault_test_connect(
         .find(|t| t.name == name)
         .cloned()
         .ok_or_else(|| String::from("目标不存在"))?;
+    if t.enc_key.is_none() {
+        // 密码模式：密码由前端本次请求传入（Zeroizing 内存驻留），用完即弃，不落盘不写日志。
+        let pw = Zeroizing::new(
+            password
+                .filter(|p| !p.is_empty())
+                .ok_or_else(|| String::from("密码连接需要输入密码"))?,
+        );
+        ssh::ssh_connect_with_password(app, &t.host, t.port, &t.user, pw).await?;
+        return Ok(format!(
+            "连接成功：{}@{}:{}（密码认证，密码仅存在于本次调用内存，未落盘）",
+            t.user, t.host, t.port
+        ));
+    }
     // 明文私钥：解密 → 解析 → 立刻清零。
     let plain = Zeroizing::new(decrypt_target_key(&master_key, &t)?);
     let key = parse_private_key(&plain)?;
@@ -595,6 +633,7 @@ mod tests {
                 host: "10.0.0.1".into(),
                 port: 22,
                 user: "u".into(),
+                auth: "key".into(),
                 enc_key: None,
                 nonce: None,
             }],
@@ -745,6 +784,7 @@ mod tests {
             host: "10.0.0.1".into(),
             port: 22,
             user: "u".into(),
+            auth: "key".into(),
             enc_key: Some(b64_encode(&enc)),
             nonce: Some(b64_encode(&nonce)),
         });

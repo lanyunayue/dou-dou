@@ -1,3 +1,4 @@
+mod monitor;
 mod pty;
 mod sftp;
 mod ssh;
@@ -114,8 +115,30 @@ async fn open_pty(
     port: u16,
     user: String,
     key_path: String,
+    password: Option<String>,
 ) -> Result<String, String> {
-    pty::open_pty(app, &state, &host, port, &user, &resolve_key_path(key_path)).await
+    let pw = password
+        .filter(|p| !p.is_empty())
+        .map(zeroize::Zeroizing::new);
+    pty::open_pty(
+        app,
+        &state,
+        &host,
+        port,
+        &user,
+        &resolve_key_path(key_path),
+        pw,
+    )
+    .await
+}
+
+/// 本地 Shell 兜底：无需靶机，直接 spawn 本机 PowerShell（学 MobaXterm 的 Local terminal）。
+#[tauri::command]
+async fn open_local_pty(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PtyState>,
+) -> Result<String, String> {
+    pty::open_local_pty(app, &state).await
 }
 
 #[tauri::command]
@@ -283,9 +306,10 @@ fn vault_add_target(
     host: String,
     port: u16,
     user: String,
+    auth: String,
     key_path: String,
 ) -> Result<(), String> {
-    vault::vault_add_target(state, name, host, port, user, key_path)
+    vault::vault_add_target(state, name, host, port, user, auth, key_path)
 }
 #[tauri::command]
 fn vault_get_key(
@@ -294,14 +318,16 @@ fn vault_get_key(
 ) -> Result<vault::VaultKeyInfo, String> {
     vault::vault_get_key(state, name)
 }
-/// 用保险库里的私钥在内存中完成一次 SSH 认证（解密 → 连接 → 用完即清，不落盘）。
+/// 用保险库里的凭据完成一次 SSH 认证：密钥目标解密私钥、密码目标用传入密码；
+/// 凭据只在内存中完成认证，用完即清，不落盘。
 #[tauri::command]
 async fn vault_test_connect(
     app: tauri::AppHandle,
     state: tauri::State<'_, VaultState>,
     name: String,
+    password: Option<String>,
 ) -> Result<String, String> {
-    vault::vault_test_connect(app, state, name).await
+    vault::vault_test_connect(app, state, name, password).await
 }
 #[tauri::command]
 fn vault_remove_target(state: tauri::State<'_, VaultState>, name: String) -> Result<(), String> {
@@ -366,6 +392,7 @@ pub fn run() {
             gateway_token,
             gateway_request,
             open_pty,
+            open_local_pty,
             pty_write,
             sftp_list,
             sftp_download,

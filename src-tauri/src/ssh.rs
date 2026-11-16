@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
+use zeroize::Zeroizing;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct HostKeyEntry {
@@ -185,7 +186,7 @@ pub async fn ssh_connect(
     let key = russh::keys::PrivateKey::read_openssh_file(std::path::Path::new(key_path))
         .map_err(|e| format!("读私钥: {e}"))?;
     // 与既有语义保持一致：认证结果不在此处判定，由后续 channel 操作暴露。
-    let (session, _auth_ok) = ssh_connect_inner(app, host, port, user, key).await?;
+    let (session, _auth_ok) = ssh_connect_pubkey(app, host, port, user, key).await?;
     Ok(session)
 }
 
@@ -203,10 +204,34 @@ pub async fn ssh_connect_with_key(
     user: &str,
     key: russh::keys::PrivateKey,
 ) -> Result<DouHandle, String> {
-    let (session, auth_ok) = ssh_connect_inner(app, host, port, user, key).await?;
+    let (session, auth_ok) = ssh_connect_pubkey(app, host, port, user, key).await?;
     if !auth_ok {
         return Err(format!(
             "认证失败：服务器拒绝了 {user}@{host}:{port} 的公钥"
+        ));
+    }
+    Ok(session)
+}
+
+/// 统一连接入口（密码认证）：主机密钥校验（connect 期间）+ 密码认证。
+///
+/// 学 MobaXterm 的密码兜底行为：没有私钥文件也能连任何有 sshd 的主机。
+/// 密码只在本次调用的内存中短暂存在（Zeroizing），**绝不落盘、绝不写日志**。
+pub async fn ssh_connect_with_password(
+    app: AppHandle,
+    host: &str,
+    port: u16,
+    user: &str,
+    password: Zeroizing<String>,
+) -> Result<DouHandle, String> {
+    let mut session = ssh_dial(app, host, port).await?;
+    let auth = session
+        .authenticate_password(user, password.as_str())
+        .await
+        .map_err(|e| format!("认证失败: {e}"))?;
+    if !auth.success() {
+        return Err(format!(
+            "认证失败：服务器拒绝了 {user}@{host}:{port} 的密码"
         ));
     }
     Ok(session)
@@ -216,15 +241,28 @@ pub async fn ssh_connect_with_key(
 ///
 /// 返回 `(会话, 认证是否成功)`：注意 `authenticate_publickey` 在服务器拒绝公钥时
 /// 返回的是 `Ok(AuthResult::Failure)` 而不是 `Err`，必须显式判定。
-async fn ssh_connect_inner(
+async fn ssh_connect_pubkey(
     app: AppHandle,
     host: &str,
     port: u16,
     user: &str,
     key: russh::keys::PrivateKey,
 ) -> Result<(DouHandle, bool), String> {
+    let mut session = ssh_dial(app, host, port).await?;
+    let auth = session
+        .authenticate_publickey(
+            user,
+            russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), None),
+        )
+        .await
+        .map_err(|e| format!("认证失败: {e}"))?;
+    Ok((session, auth.success()))
+}
+
+/// 公共拨号：TCP + 算法协商 + 主机密钥校验（TOFU/变更拒绝在 `SshHandler` 内完成）。
+async fn ssh_dial(app: AppHandle, host: &str, port: u16) -> Result<DouHandle, String> {
     let config = std::sync::Arc::new(client::Config::default());
-    let mut session = client::connect(
+    client::connect(
         config,
         (host, port),
         SshHandler {
@@ -241,16 +279,7 @@ async fn ssh_connect_inner(
         } else {
             format!("连接失败: {s}")
         }
-    })?;
-
-    let auth = session
-        .authenticate_publickey(
-            user,
-            russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), None),
-        )
-        .await
-        .map_err(|e| format!("认证失败: {e}"))?;
-    Ok((session, auth.success()))
+    })
 }
 
 /// 从 `DOU_SSH`（`user@host:port`）与 `DOU_SSH_KEY` 解析本应用统一靶机目标。

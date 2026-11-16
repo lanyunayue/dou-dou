@@ -16,6 +16,8 @@ interface VaultTarget {
   host: string
   port: number
   user: string
+  /** 认证方式：'key'（默认）/ 'password'（密码不入库，连接时输入） */
+  auth?: string
   key_path?: string
   enc_key?: string
 }
@@ -30,7 +32,10 @@ const unlisteners: UnlistenFn[] = []
 const guard = useRequestGuard()
 
 const quickName = ref(''); const quickHost = ref(''); const quickPort = ref(22); const quickUser = ref('dou')
+const quickAuth = ref<'key' | 'password'>('key')
 const masterPw = ref('')
+/** 密码模式目标的「本次连接密码」：只驻留内存，随输入/用完即清，不落盘 */
+const pwFor = ref(''); const pwInput = ref('')
 
 /** 保险库初始化/解锁（原「凭据保险库」页入口迁入此处）。 */
 async function vaultInit() {
@@ -62,16 +67,19 @@ async function load() {
   }
 }
 
-/** 3 步新增：填表 → 入库 → 完成（名称缺省 = user@host）。 */
+/** 3 步新增：填表 → 入库 → 完成（名称缺省 = user@host）。
+ *  密码模式：目标只存地址与认证方式，密码不入库（连接时临时输入）。 */
 async function quickAdd() {
   if (!quickHost.value.trim()) { notify('请填写主机地址'); return }
   const name = quickName.value.trim() || `${quickUser.value}@${quickHost.value.trim()}`
   try {
     await invoke('vault_add_target', {
       name, host: quickHost.value.trim(), port: Number(quickPort.value) || 22,
-      user: quickUser.value.trim() || 'root', keyPath: SSH_KEY,
+      user: quickUser.value.trim() || 'root',
+      auth: quickAuth.value,
+      keyPath: quickAuth.value === 'password' ? '' : SSH_KEY,
     })
-    notify(`已加密入库：${name}`)
+    notify(quickAuth.value === 'password' ? `已入库（密码模式）：${name} —— 连接时输入密码` : `已加密入库：${name}`)
     quickName.value = ''; quickHost.value = ''
     await load()
   } catch (e: any) { notify('入库失败: ' + e) }
@@ -87,6 +95,20 @@ async function getKey(name: string) {
 async function testConnect(name: string) {
   try { notify(await invoke<string>('vault_test_connect', { name })) }
   catch (e: any) { notify('连接失败: ' + e) }
+}
+
+/** 密码模式连接：密码仅存在于本次调用内存（Rust 侧 Zeroizing，用完即弃）。 */
+async function testConnectPw(name: string) {
+  if (!pwInput.value) { notify('请输入本次连接密码'); return }
+  try {
+    notify(await invoke<string>('vault_test_connect', { name, password: pwInput.value }))
+    pwInput.value = ''; pwFor.value = ''
+  } catch (e: any) { notify('连接失败: ' + e) }
+}
+
+function authLabel(t: VaultTarget): string {
+  if (t.enc_key) return '🔑 已加密'
+  return t.auth === 'password' ? '🔒 密码认证（连接时输入密码）' : '— 未配钥'
 }
 
 async function removeTarget(name: string) {
@@ -138,19 +160,35 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
         <input v-model="quickHost" class="filter" placeholder="host，如 10.0.0.224" aria-label="主机地址" />
         <input v-model="quickPort" class="filter quick-port" placeholder="22" aria-label="端口" />
         <input v-model="quickUser" class="filter" placeholder="user" aria-label="用户名" />
+        <select v-model="quickAuth" class="quick-auth" aria-label="认证方式">
+          <option value="key">密钥认证</option>
+          <option value="password">密码认证</option>
+        </select>
         <button type="button" class="btn ok" @click="quickAdd">加密入库</button>
+      </div>
+      <div class="row hint-row">
+        <span class="hint">{{ quickAuth === 'password' ? '密码模式：目标只存地址，密码不入库，连接时输入（仅驻留内存）' : '密钥模式：私钥加密入库，明文只在内存解密' }}</span>
       </div>
 
       <div v-for="t in targets" :key="t.name" class="approve-card">
         <div class="mono conn-line">
           <strong>{{ t.name }}</strong> · {{ t.user }}@{{ t.host }}:{{ t.port }}
-          <span :class="t.enc_key ? 'ok-text' : 'hint'">{{ t.enc_key ? '🔑 已加密' : '— 未配钥' }}</span>
+          <span :class="t.enc_key ? 'ok-text' : (t.auth === 'password' ? 'ok-text' : 'hint')">{{ authLabel(t) }}</span>
         </div>
         <div class="hint">主机密钥：{{ fingerprintOf(`${t.host}:${t.port}`) }}</div>
         <div class="approve-actions">
           <button type="button" class="btn ok" v-if="t.enc_key" @click="getKey(t.name)">校验密钥</button>
           <button type="button" class="btn" v-if="t.enc_key" @click="testConnect(t.name)">用密钥连接</button>
+          <button type="button" class="btn ok" v-if="t.auth === 'password' && !t.enc_key" @click="pwFor = pwFor === t.name ? '' : t.name; pwInput = ''">
+            {{ pwFor === t.name ? '收起' : '密码连接' }}
+          </button>
           <button type="button" class="btn bad" @click="removeTarget(t.name)">删除</button>
+        </div>
+        <!-- 密码模式：本次连接密码仅驻留内存，提交后立即清空 -->
+        <div v-if="pwFor === t.name" class="row pw-row">
+          <input type="password" v-model="pwInput" class="filter" placeholder="本次连接密码（仅内存，不落盘）"
+                 aria-label="连接密码" autocomplete="off" @keyup.enter="testConnectPw(t.name)" />
+          <button type="button" class="btn ok" @click="testConnectPw(t.name)">连接</button>
         </div>
       </div>
     </div>
@@ -159,6 +197,18 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
 
 <style scoped>
 .quick-port { width: 72px; }
+.quick-auth {
+  height: 26px;
+  background: var(--dou-panel);
+  color: var(--dou-text);
+  border: 1px solid var(--dou-border);
+  border-radius: var(--dou-radius-sm, 4px);
+  font-size: 12px;
+  padding: 0 4px;
+}
+.hint-row { margin-top: -6px; margin-bottom: 8px; }
+.pw-row { margin-top: 8px; }
+.pw-row .filter { max-width: 260px; }
 .conn-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .vault-state { margin-top: 4px; }
 </style>
