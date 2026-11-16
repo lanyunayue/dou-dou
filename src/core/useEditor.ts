@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, sshError, audit, handleSshFailure } from './useSsh'
 import { emit } from '../events/useEventBus'
+import { notify, askConfirm } from '../shared/feedback'
 import type { RemoteStat } from '../shared/types'
 
 // 编辑器状态：当前打开的远端文件 / 远端属性（size, mtime）/ 文本内容
@@ -29,10 +30,10 @@ export async function saveFile() {
   try {
     const st = await invoke('remote_stat', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, remote: editingFile.value }) as [number, number]
     if (editingStat.value && Number(st[1]) !== editingStat.value.mtime) {
-      if (!confirm(`远端 ${editingFile.value} 已被改动（mtime 不一致），仍要覆盖保存吗？`)) return
+      if (!askConfirm(`远端 ${editingFile.value} 已被改动（mtime 不一致），仍要覆盖保存吗？`)) return
     }
     editingStat.value = { size: st[0], mtime: st[1] }
-  } catch (e: any) { handleSshFailure(e, '比对远端 mtime'); alert('保存中止：' + sshError.value) }
+  } catch (e: any) { handleSshFailure(e, '比对远端 mtime'); notify('保存中止：' + sshError.value) }
   audit.value.unshift(`[${new Date().toLocaleTimeString()}] 保存 ${editingFile.value} → 过隔离区+扫描`)
   emit('file:saved', editingFile.value)
 }

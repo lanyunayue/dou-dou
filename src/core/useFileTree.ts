@@ -2,6 +2,8 @@ import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, sshError, handleSshFailure } from './useSsh'
 import { openRemoteFile } from './useEditor'
+import { useRequestGuard } from './useRequestGuard'
+import { notify } from '../shared/feedback'
 import type { RemoteFile } from '../shared/types'
 
 // 文件树状态：当前目录 / 目录项 / 过滤器
@@ -10,6 +12,9 @@ export const files = ref<RemoteFile[]>([])
 export const showHidden = ref(false)
 export const fileFilter = ref('')
 
+// 竞态守卫：快速连续切换目录时，先发的慢响应不得覆盖新目录结果
+const loadGuard = useRequestGuard()
+
 export const visibleFiles = computed(() => files.value.filter(f => {
   if (!showHidden.value && f.name.startsWith('.')) return false
   if (fileFilter.value && !f.name.toLowerCase().includes(fileFilter.value.toLowerCase())) return false
@@ -17,9 +22,16 @@ export const visibleFiles = computed(() => files.value.filter(f => {
 }))
 
 export async function loadFiles(path: string) {
+  const id = loadGuard.begin()
   cwd.value = path
-  try { files.value = await invoke('sftp_list', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, path }) }
-  catch (e: any) { files.value = []; handleSshFailure(e, '列出远端目录') }
+  try {
+    const list = await invoke<RemoteFile[]>('sftp_list', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, path })
+    if (!loadGuard.isCurrent(id)) return
+    files.value = list
+  } catch (e: any) {
+    if (!loadGuard.isCurrent(id)) return
+    files.value = []; handleSshFailure(e, '列出远端目录')
+  }
 }
 
 export function goUp() {
@@ -31,10 +43,10 @@ export function goUp() {
 export async function downloadCwd() {
   try {
     const p = await invoke('sftp_download', { host: SSH_HOST, port: SSH_PORT, user: SSH_USER, keyPath: SSH_KEY, remote: cwd.value + '/dou_put_test.txt' })
-    alert('已下载到: ' + p)
+    notify('已下载到: ' + p)
   } catch (e: any) {
     handleSshFailure(e, '下载')
-    alert('下载失败：' + sshError.value + '\n靶机就绪后点「一键重试」恢复')
+    notify('下载失败：' + sshError.value + '\n靶机就绪后点「一键重试」恢复')
   }
 }
 

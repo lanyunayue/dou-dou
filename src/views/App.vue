@@ -24,6 +24,9 @@
       <!-- 统一可见错误态：fail-closed / 401 / 429 / 网关离线，含一键重试 -->
       <ErrorBanner />
 
+      <!-- 渲染错误边界：单视图崩溃不拖垮应用外壳 -->
+      <ErrorBoundary>
+
       <!-- 四区：左上=文件树，右上=终端，左下=编辑器 -->
       <div v-if="view==='term'||view==='files'" class="grid">
         <FileTreePanel />
@@ -80,6 +83,8 @@
       <!-- 主机密钥 -->
       <HostKeyPanel v-if="view==='hostkeys'" />
 
+      </ErrorBoundary>
+
     </div>
   </div>
 </template>
@@ -90,6 +95,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import ErrorBanner from '../components/ErrorBanner.vue'
+import ErrorBoundary from '../components/ErrorBoundary.vue'
 import FileTreePanel from '../components/FileTreePanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import EditorPanel from '../components/EditorPanel.vue'
@@ -111,6 +117,7 @@ import { registerHostKeyListener } from '../core/useHostKeys'
 import { loadFiles } from '../core/useFileTree'
 import { snapshot, importMoba } from '../commands/useShell'
 import { SSH_KEY } from '../core/useSsh'
+import { notify } from '../shared/feedback'
 
 const navs = [{key:'term',label:'终端'},{key:'files',label:'文件'}]
 const view = ref('term')
@@ -128,17 +135,17 @@ const vaultUnlocked = ref(false)
 const vaultTargets = ref<any[]>([])
 const masterPw = ref('')
 const newName = ref(''); const newHost = ref(''); const newPort = ref(22); const newUser = ref('dou'); const newKey = ref(SSH_KEY)
-async function vaultInit() { try { await invoke('vault_init', { master: masterPw.value }); vaultUnlocked.value = true; await vaultList(); alert('保险库已初始化并解锁') } catch (e: any) { alert('初始化失败: ' + e) } }
-async function vaultUnlock() { try { await invoke('vault_unlock', { master: masterPw.value }); vaultUnlocked.value = true; await vaultList() } catch (e: any) { alert('解锁失败: ' + e) } }
+async function vaultInit() { try { await invoke('vault_init', { master: masterPw.value }); vaultUnlocked.value = true; await vaultList(); notify('保险库已初始化并解锁') } catch (e: any) { notify('初始化失败: ' + e) } }
+async function vaultUnlock() { try { await invoke('vault_unlock', { master: masterPw.value }); vaultUnlocked.value = true; await vaultList() } catch (e: any) { notify('解锁失败: ' + e) } }
 function vaultLock() { invoke('vault_lock'); vaultUnlocked.value = false; vaultTargets.value = [] }
 async function vaultList() { try { vaultTargets.value = await invoke('vault_list_targets') } catch { vaultTargets.value = [] } }
 async function vaultAdd() {
-  try { await invoke('vault_add_target', { name: newName.value, host: newHost.value, port: Number(newPort.value), user: newUser.value, keyPath: newKey.value }); await vaultList(); alert('已加密入库') }
-  catch (e: any) { alert('入库失败: ' + e) }
+  try { await invoke('vault_add_target', { name: newName.value, host: newHost.value, port: Number(newPort.value), user: newUser.value, keyPath: newKey.value }); await vaultList(); notify('已加密入库') }
+  catch (e: any) { notify('入库失败: ' + e) }
 }
-async function vaultGetKey(name: string) { try { const info = await invoke<VaultKeyInfo>('vault_get_key', { name }); alert('私钥已在内存中解密校验：\n算法 ' + info.algorithm + '\n指纹 ' + info.fingerprint + '\n（明文未落盘，用完即清）') } catch (e: any) { alert('取出失败: ' + e) } }
-async function vaultTestConnect(name: string) { try { const msg = await invoke<string>('vault_test_connect', { name }); alert(msg) } catch (e: any) { alert('连接失败: ' + e) } }
-async function vaultRemove(name: string) { try { await invoke('vault_remove_target', { name }); await vaultList() } catch (e: any) { alert('删除失败: ' + e) } }
+async function vaultGetKey(name: string) { try { const info = await invoke<VaultKeyInfo>('vault_get_key', { name }); notify('私钥已在内存中解密校验：\n算法 ' + info.algorithm + '\n指纹 ' + info.fingerprint + '\n（明文未落盘，用完即清）') } catch (e: any) { notify('取出失败: ' + e) } }
+async function vaultTestConnect(name: string) { try { const msg = await invoke<string>('vault_test_connect', { name }); notify(msg) } catch (e: any) { notify('连接失败: ' + e) } }
+async function vaultRemove(name: string) { try { await invoke('vault_remove_target', { name }); await vaultList() } catch (e: any) { notify('删除失败: ' + e) } }
 
 // ---------- 启动编排 ----------
 // 事件订阅在应用级注册（应用生命周期内常驻），避免跨视图切换丢事件；卸载时统一解绑。

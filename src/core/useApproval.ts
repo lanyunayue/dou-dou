@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { gwFetch, gwError, markGwFailure } from '../adapters/useGateway'
+import { notify } from '../shared/feedback'
 
 // ---------- 审批 ----------
 export const pendingTasks = ref<any[]>([])
@@ -57,7 +58,7 @@ export async function loadTasks() {
 
 export async function decideTask(id: string, approve: boolean, remember: boolean) {
   const note = rejectNotes.value[id] || ''
-  if (!approve && !note.trim()) { alert('拒绝必须填写理由'); return }
+  if (!approve && !note.trim()) { notify('拒绝必须填写理由'); return }
   try {
     await gwFetch('/approve', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -66,7 +67,7 @@ export async function decideTask(id: string, approve: boolean, remember: boolean
     delete rejectNotes.value[id]
     await loadTasks()
   } catch {
-    alert('审批提交失败：' + (gwError.value?.message || '请求未完成'))
+    notify('审批提交失败：' + (gwError.value?.message || '请求未完成'))
   }
 }
 
@@ -80,12 +81,12 @@ export async function cancelTask(id: string) {
     if (!r.ok) {
       let msg = `HTTP ${r.status}`
       try { const j = await r.json(); if (j && j.error) msg = j.error } catch { /* 保留状态码 */ }
-      alert('终止失败：' + msg)
+      notify('终止失败：' + msg)
       return
     }
     await loadTasks()
   } catch {
-    alert('终止请求未完成：' + (gwError.value?.message || '网关不可用'))
+    notify('终止请求未完成：' + (gwError.value?.message || '网关不可用'))
   }
 }
 

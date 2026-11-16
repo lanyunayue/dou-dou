@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { gwFetch, gwError, replaceTokenPlaceholder } from '../adapters/useGateway'
+import { notify } from '../shared/feedback'
 
 // ---------- 接入向导 ----------
 export const onboardClient = ref('workbuddy')
@@ -29,9 +30,9 @@ export async function copySnippet() {
     // 复制前再做一次本地替换，确保产物无 ${DOU_TOKEN} 残留
     const text = await replaceTokenPlaceholder(onboardSnippet.value)
     await navigator.clipboard.writeText(text)
-    alert('片段已复制（Authorization 占位符已本地替换为可用令牌）')
+    notify('片段已复制（Authorization 占位符已本地替换为可用令牌）')
   } catch {
-    alert('复制失败：' + (gwError.value?.message || '令牌不可用'))
+    notify('复制失败：' + (gwError.value?.message || '令牌不可用'))
   }
 }
 
