@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { GwErrorInfo, GatewayStatus } from '../types'
+import type { GwErrorInfo, GatewayStatus } from '../shared/types'
 
 // 网关地址固定由 Rust 侧 `gateway_request` 使用 http://127.0.0.1:7419，
 // 前端不再直连 fetch（WebView 跨域 CORS 会挡住响应读取）。

@@ -7,6 +7,6 @@
 </template>
 
 <script setup lang="ts">
-import { gwError, dismissGwError } from '../composables/useGateway'
-import { retryGw } from '../composables/useRecovery'
+import { gwError, dismissGwError } from '../adapters/useGateway'
+import { retryGw } from '../commands/useRecovery'
 </script>

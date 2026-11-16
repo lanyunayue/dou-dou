@@ -23,5 +23,5 @@
 </template>
 
 <script setup lang="ts">
-import { hostKeys, gatewayHostKeys, forgetHost, forgetGatewayHost } from '../composables/useHostKeys'
+import { hostKeys, gatewayHostKeys, forgetHost, forgetGatewayHost } from '../core/useHostKeys'
 </script>

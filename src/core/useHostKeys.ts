@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { gwFetch } from './useGateway'
+import { gwFetch } from '../adapters/useGateway'
 
 // ---------- 客户端终端信任库（Tauri 侧 known_hosts） ----------
 export const hostKeys = ref<any[]>([])

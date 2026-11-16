@@ -23,6 +23,6 @@
 
 <script setup lang="ts">
 import OfflineState from './OfflineState.vue'
-import { cwd, showHidden, fileFilter, visibleFiles, goUp, downloadCwd, onFile } from '../composables/useFileTree'
-import { sshError } from '../composables/useSsh'
+import { cwd, showHidden, fileFilter, visibleFiles, goUp, downloadCwd, onFile } from '../core/useFileTree'
+import { sshError } from '../core/useSsh'
 </script>

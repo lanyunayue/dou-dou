@@ -1,7 +1,7 @@
-import { resetGwToken, gwError, refresh } from './useGateway'
-import { fetchOnboard } from './useOnboard'
-import { loadTasks } from './useApproval'
-import { loadTokens } from './useCredentials'
+import { resetGwToken, gwError, refresh } from '../adapters/useGateway'
+import { fetchOnboard } from '../core/useOnboard'
+import { loadTasks } from '../core/useApproval'
+import { loadTokens } from '../core/useCredentials'
 
 // 网关统一重试：清令牌 → 刷网关状态 → 重拉各面板数据
 export async function retryGw() {

@@ -5,7 +5,7 @@ const { gwFetchMock, markGwFailureMock } = vi.hoisted(() => ({
   markGwFailureMock: vi.fn(),
 }))
 
-vi.mock('../useGateway', () => ({
+vi.mock('../../adapters/useGateway', () => ({
   gwFetch: gwFetchMock,
   gwError: { value: null as { message: string } | null },
   markGwFailure: markGwFailureMock,

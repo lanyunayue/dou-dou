@@ -7,7 +7,7 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, sshError, audit, handleSshFailure } from './useSsh'
-import type { TerminalTab } from '../types'
+import type { TerminalTab } from '../shared/types'
 
 // 终端状态：多会话标签 / 当前会话 / 检索 / 广播
 export const termEl = ref<HTMLDivElement>()

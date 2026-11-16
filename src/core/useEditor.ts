@@ -1,8 +1,8 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, sshError, audit, handleSshFailure } from './useSsh'
-import { emit } from './useEventBus'
-import type { RemoteStat } from '../types'
+import { emit } from '../events/useEventBus'
+import type { RemoteStat } from '../shared/types'
 
 // 编辑器状态：当前打开的远端文件 / 远端属性（size, mtime）/ 文本内容
 export const editingFile = ref('')

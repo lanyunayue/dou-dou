@@ -43,5 +43,5 @@
 import {
   onboardClient, onboardSnippet, onboardPaths, onboardNote, writeResult, onboardProbe,
   fetchOnboard, copySnippet, writeConfig, probeHandshake,
-} from '../composables/useOnboard'
+} from '../core/useOnboard'
 </script>

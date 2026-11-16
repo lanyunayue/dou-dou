@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { gwFetch, gwError, markGwFailure } from './useGateway'
+import { gwFetch, gwError, markGwFailure } from '../adapters/useGateway'
 
 // ---------- 凭据与作用域 ----------
 export const tokens = ref<any[]>([])

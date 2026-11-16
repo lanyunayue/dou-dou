@@ -19,8 +19,8 @@
 </template>
 
 <script setup lang="ts">
-import { sshError } from '../composables/useSsh'
-import { retrySsh } from '../composables/useWorkspace'
+import { sshError } from '../core/useSsh'
+import { retrySsh } from '../commands/useWorkspace'
 
 // variant='files'   → 文件树内的浅色离线提示块
 // variant='terminal'→ 终端区的深色全屏覆盖层

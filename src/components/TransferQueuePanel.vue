@@ -34,5 +34,5 @@
 import {
   tqTasks, tqRemote, tqLocal, tqType, syncLocal, syncRemote, syncMode,
   fmtBytes, enqueueTq, doSync, tqClear, tqPause, tqResume, tqCancel,
-} from '../composables/useTransferQueue'
+} from '../core/useTransferQueue'
 </script>

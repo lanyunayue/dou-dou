@@ -24,8 +24,8 @@ import OfflineState from './OfflineState.vue'
 import {
   termEl, activeSid, sessionFilter, broadcast, visibleTabs,
   newTab, switchTab, closeTab, exportTerm, doBroadcast,
-} from '../composables/useTerminal'
-import { sshError } from '../composables/useSsh'
+} from '../core/useTerminal'
+import { sshError } from '../core/useSsh'
 import 'xterm/css/xterm.css'
 
 // 终端 DOM 挂载点：xterm 需要真实节点才能 open()，这里把节点交给终端 composable

@@ -30,7 +30,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { pendingTasksView, rejectNotes, pendingCount, gwDisconnected, decideTask, cancelTask } from '../composables/useApproval'
+import { pendingTasksView, rejectNotes, pendingCount, gwDisconnected, decideTask, cancelTask } from '../core/useApproval'
 
 const orphanCount = computed(() => pendingTasksView.value.filter(t => t.orphaned).length)
 </script>

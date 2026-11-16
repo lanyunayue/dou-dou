@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { gwFetch, gwError, replaceTokenPlaceholder } from './useGateway'
+import { gwFetch, gwError, replaceTokenPlaceholder } from '../adapters/useGateway'
 
 // ---------- 接入向导 ----------
 export const onboardClient = ref('workbuddy')

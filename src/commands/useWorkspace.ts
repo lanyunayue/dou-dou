@@ -1,6 +1,6 @@
-import { sshError } from './useSsh'
-import { connectSsh } from './useTerminal'
-import { cwd, loadFiles } from './useFileTree'
+import { sshError } from '../core/useSsh'
+import { connectSsh } from '../core/useTerminal'
+import { cwd, loadFiles } from '../core/useFileTree'
 
 // 靶机重试：先重连靶机，再按当前目录重新拉取文件列表
 export async function retrySsh() {

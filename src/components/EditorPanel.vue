@@ -11,5 +11,5 @@
 
 <script setup lang="ts">
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
-import { editingFile, editorText, saveFile } from '../composables/useEditor'
+import { editingFile, editorText, saveFile } from '../core/useEditor'
 </script>

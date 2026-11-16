@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY, sshError, handleSshFailure } from './useSsh'
 import { openRemoteFile } from './useEditor'
-import type { RemoteFile } from '../types'
+import type { RemoteFile } from '../shared/types'
 
 // 文件树状态：当前目录 / 目录项 / 过滤器
 export const cwd = ref('/home/dou')

@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { gwFetch, gwError, markGwFailure } from './useGateway'
+import { gwFetch, gwError, markGwFailure } from '../adapters/useGateway'
 
 // ---------- 审批 ----------
 export const pendingTasks = ref<any[]>([])

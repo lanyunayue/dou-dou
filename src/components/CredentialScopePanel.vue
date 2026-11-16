@@ -36,5 +36,5 @@
 </template>
 
 <script setup lang="ts">
-import { tokens, issueTier, issueClient, issuedToken, issueToken, revokeToken, copyIssued, fmtTime } from '../composables/useCredentials'
+import { tokens, issueTier, issueClient, issuedToken, issueToken, revokeToken, copyIssued, fmtTime } from '../core/useCredentials'
 </script>

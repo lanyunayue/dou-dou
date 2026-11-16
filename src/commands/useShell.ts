@@ -1,5 +1,5 @@
-import { tabs, activeSid } from './useTerminal'
-import { cwd } from './useFileTree'
+import { tabs, activeSid } from '../core/useTerminal'
+import { cwd } from '../core/useFileTree'
 
 // ---------- 侧边栏动作：快照 / 导入 MobaXterm ----------
 export async function hash8(s: string): Promise<string> {
