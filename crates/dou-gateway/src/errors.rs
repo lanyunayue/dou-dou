@@ -14,13 +14,15 @@ pub fn classify(raw: &str) -> ErrorInfo {
     if raw.contains("known_hosts 文件损坏") {
         return ErrorInfo {
             code: "E_KNOWN_HOSTS_CORRUPT",
-            human: "known_hosts 损坏或不可读，已拒绝连接。修复或删除该文件后重新确认主机公钥。".into(),
+            human: "known_hosts 损坏或不可读，已拒绝连接。修复或删除该文件后重新确认主机公钥。"
+                .into(),
         };
     }
     if raw.contains("主机密钥不匹配") {
         return ErrorInfo {
             code: "E_HOSTKEY_MISMATCH",
-            human: "主机密钥与本地记录不一致。可能是对方换了机器，也可能是中间人；已拒绝连接。".into(),
+            human: "主机密钥与本地记录不一致。可能是对方换了机器，也可能是中间人；已拒绝连接。"
+                .into(),
         };
     }
     if lower.contains("10061") || lower.contains("refused") || lower.contains("积极拒绝") {

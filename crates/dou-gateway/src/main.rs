@@ -13,8 +13,8 @@ mod rpc;
 mod sanitize;
 mod scan;
 mod scope;
-mod snapshot;
 mod sftp;
+mod snapshot;
 mod ssh;
 mod state;
 mod store;
@@ -67,7 +67,9 @@ async fn main() {
         eprintln!("[state] 状态表初始化失败: {e}");
     }
     // 默认关闭 dev：不显式设置 DOU_DEV_MODE=1 时，禁止本机命令兜底执行。
-    let dev = std::env::var("DOU_DEV_MODE").map(|v| v == "1").unwrap_or(false);
+    let dev = std::env::var("DOU_DEV_MODE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     let bind = std::env::var("DOU_BIND").unwrap_or_else(|_| DEFAULT_BIND.to_string());
 
     if !is_loopback(&bind) {
@@ -113,7 +115,11 @@ async fn main() {
                             conn.port,
                             conn.auth_method,
                             short,
-                            if first_seen { "首次记录" } else { "与记录一致" }
+                            if first_seen {
+                                "首次记录"
+                            } else {
+                                "与记录一致"
+                            }
                         );
                         let method = conn.auth_method;
                         sessions.lock().await.insert("default".to_string(), conn);
@@ -198,7 +204,10 @@ async fn main() {
         .route("/console", get(console_page))
         .with_state(state.clone())
         // W-15：单层中间件统一收口全部路由；唯一 Bearer 解析点在 authz.rs。
-        .layer(axum::middleware::from_fn_with_state(state, authz::require_auth));
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            authz::require_auth,
+        ));
 
     let listener = match tokio::net::TcpListener::bind(&bind).await {
         Ok(l) => l,
@@ -245,7 +254,10 @@ async fn audit_query(State(st): State<AppState>, uri: axum::http::Uri) -> Respon
         .collect();
     let since = params.get("since_ms").and_then(|s| s.parse::<u64>().ok());
     let source = params.get("source").map(|s| s.as_str());
-    let limit = params.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(200);
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(200);
     let items = audit::query(&st.audit, since, source, limit);
     let body = serde_json::to_string_pretty(&json!({ "count": items.len(), "items": items }))
         .unwrap_or_default();
@@ -264,9 +276,13 @@ async fn audit_verify(State(st): State<AppState>) -> Response {
         "chain_ok": ok, "broken_index": broken,
         "entries": entries, "verifiable": entries > 0
     }))
-        .unwrap_or_default();
+    .unwrap_or_default();
     Response::builder()
-        .status(if ok { StatusCode::OK } else { StatusCode::CONFLICT })
+        .status(if ok {
+            StatusCode::OK
+        } else {
+            StatusCode::CONFLICT
+        })
         .header("Content-Type", "application/json; charset=utf-8")
         .body(body.into())
         .unwrap()
@@ -334,7 +350,10 @@ async function decide(id, approve) {{
 }}
 </script>
 </body></html>"#,
-        s = s, rows = rows, pending_html = pending_html, n_pending = pending.len()
+        s = s,
+        rows = rows,
+        pending_html = pending_html,
+        n_pending = pending.len()
     );
     Html(html)
 }
@@ -344,8 +363,21 @@ async fn audit_export(State(st): State<AppState>) -> Response {
     let mut csv = String::from("ts_ms,source,action,target,verdict,trace_id\n");
     let items = audit::tail(&st.audit, 10_000);
     for v in &items {
-        let f = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").replace(',', "，");
-        csv.push_str(&format!("{},{},{},{},{},{}\n", f("ts_ms"), f("source"), f("action"), f("target"), f("verdict"), f("trace_id")));
+        let f = |k: &str| {
+            v.get(k)
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .replace(',', "，")
+        };
+        csv.push_str(&format!(
+            "{},{},{},{},{},{}\n",
+            f("ts_ms"),
+            f("source"),
+            f("action"),
+            f("target"),
+            f("verdict"),
+            f("trace_id")
+        ));
     }
     Response::builder()
         .status(StatusCode::OK)
@@ -359,14 +391,21 @@ async fn tasks_list(State(st): State<AppState>) -> Response {
     // A3 审批超时：读取任务列表时惰性触发 5min 超时拒绝。
     let expired = st.taskhub.expire_stale_pending(5 * 60 * 1000).await;
     if expired > 0 {
-        audit::write(&st.audit, audit::event(
-            "system", "approval_timeout", "-", "denied",
-            json!({ "expired_count": expired, "timeout_min": 5 }),
-        ));
+        audit::write(
+            &st.audit,
+            audit::event(
+                "system",
+                "approval_timeout",
+                "-",
+                "denied",
+                json!({ "expired_count": expired, "timeout_min": 5 }),
+            ),
+        );
     }
     let tasks = st.taskhub.list_all().await;
     let items: Vec<Value> = tasks.iter().map(tasks::task_to_json).collect();
-    let body = serde_json::to_string(&json!({"count": items.len(), "items": items})).unwrap_or_default();
+    let body =
+        serde_json::to_string(&json!({"count": items.len(), "items": items})).unwrap_or_default();
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json; charset=utf-8")
@@ -377,19 +416,32 @@ async fn tasks_list(State(st): State<AppState>) -> Response {
 /// A2 终止任务。body: { "task_id": "task_xxx" }。
 async fn cancel_task(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let id = v.get("task_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let id = v
+        .get("task_id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     if id.is_empty() {
         return json_err(StatusCode::BAD_REQUEST, "task_id 必填");
     }
     match st.taskhub.cancel(&id).await {
         Ok(Some(t)) => {
-            audit::write(&st.audit, audit::event(
-                "human", "task_cancel", &id, "allowed",
-                json!({ "command": t.command, "prev_status": "running_or_pending" }),
-            ));
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "human",
+                    "task_cancel",
+                    &id,
+                    "allowed",
+                    json!({ "command": t.command, "prev_status": "running_or_pending" }),
+                ),
+            );
             json_ok(&json!({ "ok": true, "task_id": id, "status": "cancelled" }))
         }
-        Ok(None) => Response::builder().status(StatusCode::NOT_FOUND).body("{}".into()).unwrap(),
+        Ok(None) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body("{}".into())
+            .unwrap(),
         Err(e) => json_err(StatusCode::BAD_REQUEST, &e),
     }
 }
@@ -400,33 +452,59 @@ async fn cancel_task(State(st): State<AppState>, body: String) -> Response {
 /// body: { "session": "default" }。占用后代理在该会话的调用将被拒绝。
 async fn session_lock(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let session = v.get("session").and_then(|x| x.as_str()).unwrap_or("default").to_string();
+    let session = v
+        .get("session")
+        .and_then(|x| x.as_str())
+        .unwrap_or("default")
+        .to_string();
     // 人工占用强制成功（force=true），覆盖任何既有占用。
     let ok = state::session_try_lock(&session, "human", true);
-    audit::write(&st.audit, audit::event(
-        "human", "session_lock", &session, if ok { "allowed" } else { "failed" },
-        json!({}),
-    ));
+    audit::write(
+        &st.audit,
+        audit::event(
+            "human",
+            "session_lock",
+            &session,
+            if ok { "allowed" } else { "failed" },
+            json!({}),
+        ),
+    );
     if ok {
         json_ok(&json!({ "ok": true, "session": session, "owner": "human" }))
     } else {
-        json_err(StatusCode::INTERNAL_SERVER_ERROR, "占用会话失败（状态库不可用）")
+        json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "占用会话失败（状态库不可用）",
+        )
     }
 }
 
 /// 释放会话锁。body: { "session": "default" }。
 async fn session_unlock(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let session = v.get("session").and_then(|x| x.as_str()).unwrap_or("default").to_string();
+    let session = v
+        .get("session")
+        .and_then(|x| x.as_str())
+        .unwrap_or("default")
+        .to_string();
     let ok = state::session_unlock(&session, "human", true);
-    audit::write(&st.audit, audit::event(
-        "human", "session_unlock", &session, if ok { "allowed" } else { "failed" },
-        json!({}),
-    ));
+    audit::write(
+        &st.audit,
+        audit::event(
+            "human",
+            "session_unlock",
+            &session,
+            if ok { "allowed" } else { "failed" },
+            json!({}),
+        ),
+    );
     if ok {
         json_ok(&json!({ "ok": true, "session": session, "released": true }))
     } else {
-        json_err(StatusCode::INTERNAL_SERVER_ERROR, "释放会话失败（状态库不可用）")
+        json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "释放会话失败（状态库不可用）",
+        )
     }
 }
 
@@ -441,15 +519,33 @@ async fn scope_tokens() -> Response {
 
 async fn issue_token(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let tier = v.get("tier").and_then(|x| x.as_str()).unwrap_or("observe").to_string();
-    let client_id = v.get("client_id").and_then(|x| x.as_str()).unwrap_or("unknown").to_string();
+    let tier = v
+        .get("tier")
+        .and_then(|x| x.as_str())
+        .unwrap_or("observe")
+        .to_string();
+    let client_id = v
+        .get("client_id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("unknown")
+        .to_string();
     let scope = scope::default_scope(&tier, &client_id);
     match scope::issue_token(&tier, scope) {
         Ok((plain, rec)) => {
-            audit::write(&st.audit, audit::event("human", "issue_token", &rec.id, "allowed",
-                json!({ "tier": tier, "client_id": client_id, "expires_at": rec.expires_at })));
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "human",
+                    "issue_token",
+                    &rec.id,
+                    "allowed",
+                    json!({ "tier": tier, "client_id": client_id, "expires_at": rec.expires_at }),
+                ),
+            );
             // 明文仅本次返回一次，库里只存哈希。
-            json_ok(&json!({ "token": plain, "id": rec.id, "tier": tier, "scope": rec.scope, "expires_at": rec.expires_at }))
+            json_ok(
+                &json!({ "token": plain, "id": rec.id, "tier": tier, "scope": rec.scope, "expires_at": rec.expires_at }),
+            )
         }
         Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
     }
@@ -457,10 +553,17 @@ async fn issue_token(State(st): State<AppState>, body: String) -> Response {
 
 async fn revoke_token(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let id = v
+        .get("id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     match scope::revoke_token(&id) {
         Ok(_) => {
-            audit::write(&st.audit, audit::event("human", "revoke_token", &id, "allowed", json!({})));
+            audit::write(
+                &st.audit,
+                audit::event("human", "revoke_token", &id, "allowed", json!({})),
+            );
             json_ok(&json!({ "ok": true }))
         }
         Err(e) => json_err(StatusCode::BAD_REQUEST, &e),
@@ -470,10 +573,17 @@ async fn revoke_token(State(st): State<AppState>, body: String) -> Response {
 // ---------- 接入向导：配置片段生成 ----------
 
 async fn onboard_config(State(st): State<AppState>, uri: axum::http::Uri) -> Response {
-    let params: std::collections::HashMap<String, String> = uri.query().unwrap_or("")
-        .split('&').filter_map(|kv| kv.split_once('='))
-        .map(|(k, v)| (k.to_string(), v.to_string())).collect();
-    let client = params.get("client").map(|s| s.as_str()).unwrap_or("workbuddy");
+    let params: std::collections::HashMap<String, String> = uri
+        .query()
+        .unwrap_or("")
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let client = params
+        .get("client")
+        .map(|s| s.as_str())
+        .unwrap_or("workbuddy");
     let endpoint = format!("http://127.0.0.1:7419/mcp");
     // 安全：HTTP 响应绝不回吐完整主令牌。片段用占位符；
     // 真实令牌由 /onboard/write 在服务端本地代写，或用户从 token.txt 手动替换。
@@ -510,20 +620,30 @@ async fn onboard_config(State(st): State<AppState>, uri: axum::http::Uri) -> Res
 }
 
 fn json_ok(v: &Value) -> Response {
-    Response::builder().status(StatusCode::OK)
+    Response::builder()
+        .status(StatusCode::OK)
         .header("Content-Type", "application/json; charset=utf-8")
-        .body(serde_json::to_string(v).unwrap_or_default().into()).unwrap()
+        .body(serde_json::to_string(v).unwrap_or_default().into())
+        .unwrap()
 }
 
 fn json_err(code: StatusCode, msg: &str) -> Response {
-    Response::builder().status(code)
+    Response::builder()
+        .status(code)
         .header("Content-Type", "application/json; charset=utf-8")
-        .body(serde_json::to_string(&json!({ "error": msg })).unwrap_or_default().into()).unwrap()
+        .body(
+            serde_json::to_string(&json!({ "error": msg }))
+                .unwrap_or_default()
+                .into(),
+        )
+        .unwrap()
 }
 
 fn expand_home(p: &str) -> String {
     if let Some(rest) = p.strip_prefix("~/") {
-        let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
         return format!("{}/{}", home, rest);
     }
     p.to_string()
@@ -532,11 +652,18 @@ fn expand_home(p: &str) -> String {
 /// 代写配置：备份 → 合并条目 → 解析校验 → 失败回滚（计划书 4.7 三条硬约束）。
 async fn onboard_write(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let client = v.get("client").and_then(|x| x.as_str()).unwrap_or("workbuddy").to_string();
+    let client = v
+        .get("client")
+        .and_then(|x| x.as_str())
+        .unwrap_or("workbuddy")
+        .to_string();
 
     // TOML（Codex）不做结构化代写，降级为复制片段，避免写坏配置。
     if client == "codex" {
-        return json_err(StatusCode::BAD_REQUEST, "Codex 为 TOML 配置，本端不代写，请用复制片段粘贴");
+        return json_err(
+            StatusCode::BAD_REQUEST,
+            "Codex 为 TOML 配置，本端不代写，请用复制片段粘贴",
+        );
     }
 
     let candidates: Vec<&str> = match client.as_str() {
@@ -546,69 +673,122 @@ async fn onboard_write(State(st): State<AppState>, body: String) -> Response {
         "cursor" => vec![".cursor/mcp.json"],
         _ => vec!["~/.workbuddy/mcp.json", "~/.codebuddy/.mcp.json"],
     };
-    let top_key = if client == "vscode" { "servers" } else { "mcpServers" };
+    let top_key = if client == "vscode" {
+        "servers"
+    } else {
+        "mcpServers"
+    };
     let endpoint = "http://127.0.0.1:7419/mcp".to_string();
-    let dou_entry = json!({ "url": endpoint, "headers": { "Authorization": format!("Bearer {}", st.token) } });
+    let dou_entry =
+        json!({ "url": endpoint, "headers": { "Authorization": format!("Bearer {}", st.token) } });
 
     for raw in candidates {
         let path = expand_home(raw);
-        let parent = std::path::Path::new(&path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
         // 父目录不存在则跳过下一个候选。
-        if !std::path::Path::new(&parent).exists() { continue; }
+        if !std::path::Path::new(&parent).exists() {
+            continue;
+        }
 
         let orig = std::fs::read_to_string(&path).unwrap_or_default();
         let backup: Option<String> = if !orig.trim().is_empty() {
-            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             let bk = format!("{path}.bak.{ts}");
             let _ = std::fs::write(&bk, &orig);
             Some(bk)
-        } else { None };
+        } else {
+            None
+        };
 
         let mut existing: Value = if orig.trim().is_empty() {
             json!({})
         } else {
-            match serde_json::from_str::<Value>(&orig) { Ok(x) => x, Err(_) => {
-                // 原文件不是合法 JSON：不覆盖，回报。
-                return json_err(StatusCode::BAD_REQUEST, "现有配置不是合法 JSON，已跳过；请先手动备份");
-            }}
+            match serde_json::from_str::<Value>(&orig) {
+                Ok(x) => x,
+                Err(_) => {
+                    // 原文件不是合法 JSON：不覆盖，回报。
+                    return json_err(
+                        StatusCode::BAD_REQUEST,
+                        "现有配置不是合法 JSON，已跳过；请先手动备份",
+                    );
+                }
+            }
         };
 
         let existed = existing.get(top_key).and_then(|t| t.get("dou")).is_some();
-        if !existing.is_object() { existing = json!({}); }
+        if !existing.is_object() {
+            existing = json!({});
+        }
         let top = existing.as_object_mut().unwrap();
         let top_obj = top.entry(top_key.to_string()).or_insert(json!({}));
         top_obj["dou"] = dou_entry.clone();
 
-        let out = match serde_json::to_string_pretty(&existing) { Ok(x) => x, Err(e) => {
-            return json_err(StatusCode::INTERNAL_SERVER_ERROR, &format!("序列化失败: {e}"));
-        }};
+        let out = match serde_json::to_string_pretty(&existing) {
+            Ok(x) => x,
+            Err(e) => {
+                return json_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("序列化失败: {e}"),
+                );
+            }
+        };
         if let Err(e) = std::fs::write(&path, &out) {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &format!("写入失败: {e}"));
         }
 
         // 写后解析校验；失败自动回滚。
-        let verify = std::fs::read_to_string(&path).and_then(|s| serde_json::from_str::<Value>(&s).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad json")));
+        let verify = std::fs::read_to_string(&path).and_then(|s| {
+            serde_json::from_str::<Value>(&s)
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad json"))
+        });
         if verify.is_err() {
-            if let Some(bk) = &backup { let _ = std::fs::copy(bk, &path); }
+            if let Some(bk) = &backup {
+                let _ = std::fs::copy(bk, &path);
+            }
             return json_err(StatusCode::BAD_REQUEST, "写入后校验失败，已自动回滚");
         }
 
-        audit::write(&st.audit, audit::event("human", "onboard_write", &client, "allowed",
-            json!({ "path": path, "backed_up": backup, "overwrote_existed": existed })));
+        audit::write(
+            &st.audit,
+            audit::event(
+                "human",
+                "onboard_write",
+                &client,
+                "allowed",
+                json!({ "path": path, "backed_up": backup, "overwrote_existed": existed }),
+            ),
+        );
         return json_ok(&json!({
             "written": true, "path": path, "backed_up": backup,
             "overwrote_existed": existed, "rolled_back": false,
             "message": if existed { "已更新同名条目（原文件已备份）" } else { "已追加 dou 条目" }
         }));
     }
-    json_err(StatusCode::BAD_REQUEST, "没有可写的配置目录，请用复制片段方式接入")
+    json_err(
+        StatusCode::BAD_REQUEST,
+        "没有可写的配置目录，请用复制片段方式接入",
+    )
 }
 
 async fn approve_task(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let id: String = v.get("task_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let id: String = v
+        .get("task_id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     let approve = v.get("approve").and_then(|x| x.as_bool()).unwrap_or(false);
-    let note: String = v.get("note").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let note: String = v
+        .get("note")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     let remember = v.get("remember").and_then(|x| x.as_bool()).unwrap_or(false);
     // 拒绝必须填理由，理由进审计（计划书 4.9）。
     if !approve && note.trim().is_empty() {
@@ -616,11 +796,16 @@ async fn approve_task(State(st): State<AppState>, body: String) -> Response {
     }
     match st.taskhub.decide(&id, approve, &note, remember).await {
         Ok(Some(_)) => {
-            audit::write(&st.audit, audit::event(
-                "human", if approve { "approve" } else { "reject" }, &id,
-                if approve { "allowed" } else { "denied" },
-                json!({ "note": note, "remember": remember }),
-            ));
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "human",
+                    if approve { "approve" } else { "reject" },
+                    &id,
+                    if approve { "allowed" } else { "denied" },
+                    json!({ "note": note, "remember": remember }),
+                ),
+            );
             // 批准后后台执行
             if approve {
                 let hub = st.taskhub.clone();
@@ -634,7 +819,10 @@ async fn approve_task(State(st): State<AppState>, body: String) -> Response {
                     hub.mark_running(&tid).await;
                     let mut map = sessions.lock().await;
                     let out = match map.get_mut(&task.session) {
-                        Some(c) => c.exec(&task.command, std::time::Duration::from_secs(600)).await,
+                        Some(c) => {
+                            c.exec(&task.command, std::time::Duration::from_secs(600))
+                                .await
+                        }
                         None => Err("session gone".to_string()),
                     };
                     let (stdout, stderr, code) = match out {
@@ -646,21 +834,34 @@ async fn approve_task(State(st): State<AppState>, body: String) -> Response {
                         Err(e) => (String::new(), e, 127),
                     };
                     hub.finish(&tid, stdout, stderr, code).await;
-                    audit::write(&audit, audit::event(
-                        "human", "approve_exec", &tid, if code == 0 { "allowed" } else { "failed" },
-                        json!({"command": task.command, "exit_code": code, "note": note}),
-                    ));
+                    audit::write(
+                        &audit,
+                        audit::event(
+                            "human",
+                            "approve_exec",
+                            &tid,
+                            if code == 0 { "allowed" } else { "failed" },
+                            json!({"command": task.command, "exit_code": code, "note": note}),
+                        ),
+                    );
                 });
             }
-            Response::builder().status(StatusCode::OK)
+            Response::builder()
+                .status(StatusCode::OK)
                 .header("Content-Type", "application/json")
-                .body(r#"{"ok":true}"#.into()).unwrap()
+                .body(r#"{"ok":true}"#.into())
+                .unwrap()
         }
-        Ok(None) => Response::builder().status(StatusCode::NOT_FOUND).body("{}".into()).unwrap(),
-        Err(e) => Response::builder().status(StatusCode::BAD_REQUEST).body(e.into()).unwrap(),
+        Ok(None) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body("{}".into())
+            .unwrap(),
+        Err(e) => Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(e.into())
+            .unwrap(),
     }
 }
-
 
 /// 鉴权已由 `authz::require_auth` 中间件统一完成（W-15）。
 /// 本 handler 不再解析 Bearer，只从 Extension 取认证结果，
@@ -675,7 +876,13 @@ async fn handle_mcp(
 
     let req: Value = match serde_json::from_str(&body) {
         Ok(v) => v,
-        Err(e) => return rpc::http_err(StatusCode::BAD_REQUEST, -32700, &format!("parse error: {e}")),
+        Err(e) => {
+            return rpc::http_err(
+                StatusCode::BAD_REQUEST,
+                -32700,
+                &format!("parse error: {e}"),
+            )
+        }
     };
 
     let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
@@ -691,7 +898,13 @@ async fn handle_mcp(
             let sid = audit::trace_id();
             audit::write(
                 &st.audit,
-                audit::event("agent", "initialize", "-", "allowed", json!({ "session_id": sid })),
+                audit::event(
+                    "agent",
+                    "initialize",
+                    "-",
+                    "allowed",
+                    json!({ "session_id": sid }),
+                ),
             );
             rpc::ok(
                 id,
@@ -712,7 +925,10 @@ async fn handle_mcp(
         "tools/call" => {
             let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             rpc::ok(id, tools::call(&st, name, &args, cred_ref).await, None)
         }
         _ => rpc::err(id, -32601, &format!("method not found: {method}"), None),

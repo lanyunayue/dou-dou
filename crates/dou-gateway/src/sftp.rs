@@ -72,14 +72,19 @@ impl SshConnection {
 
         use tokio::io::AsyncReadExt;
         let mut buf = Vec::new();
-        let n = file.read_to_end(&mut buf).await.map_err(|e| e.to_string())?;
+        let n = file
+            .read_to_end(&mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
         drop(file);
 
         if n > max_bytes {
             return Ok(FileOutcome {
                 ok: false,
                 content: String::new(),
-                warning: Some(format!("文件 {n} 字节超过单次上限 {max_bytes}，请用行区间分段读")),
+                warning: Some(format!(
+                    "文件 {n} 字节超过单次上限 {max_bytes}，请用行区间分段读"
+                )),
                 bytes: n,
             });
         }
@@ -126,7 +131,9 @@ impl SshConnection {
             .await
             .map_err(|e| format!("open {remote_path}: {e}"))?;
         use tokio::io::AsyncWriteExt;
-        file.write_all(local_bytes).await.map_err(|e| e.to_string())?;
+        file.write_all(local_bytes)
+            .await
+            .map_err(|e| e.to_string())?;
         file.flush().await.map_err(|e| e.to_string())?;
         drop(file);
 
@@ -143,7 +150,9 @@ impl SshConnection {
             .map_err(|e| format!("open {remote_path}: {e}"))?;
         use tokio::io::AsyncReadExt;
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf).await.map_err(|e| e.to_string())?;
+        file.read_to_end(&mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
         drop(file);
         let digest = sha256_hex(&buf);
         Ok((buf, digest))

@@ -44,8 +44,7 @@ pub fn open_conn() -> Result<Connection, String> {
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let conn = Connection::open(&p)
-        .map_err(|e| format!("打开状态库 {}: {e}", p.display()))?;
+    let conn = Connection::open(&p).map_err(|e| format!("打开状态库 {}: {e}", p.display()))?;
     let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
     let _ = conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
     Ok(conn)
@@ -388,7 +387,8 @@ mod tests {
                 id TEXT PRIMARY KEY, host TEXT, user TEXT, port INTEGER, source TEXT,
                 status TEXT NOT NULL DEFAULT 'active', started_ms INTEGER NOT NULL,
                 ended_ms INTEGER, owner TEXT, locked INTEGER NOT NULL DEFAULT 0)",
-        ).unwrap();
+        )
+        .unwrap();
         let sid = "test_lock_sid";
         // 首次占用成功
         assert!(session_try_lock_on(&conn, sid, "human", false));
@@ -412,7 +412,8 @@ mod tests {
                 id TEXT PRIMARY KEY, host TEXT, user TEXT, port INTEGER, source TEXT,
                 status TEXT NOT NULL DEFAULT 'active', started_ms INTEGER NOT NULL,
                 ended_ms INTEGER, owner TEXT, locked INTEGER NOT NULL DEFAULT 0)",
-        ).unwrap();
+        )
+        .unwrap();
         let sid = "test_lock_priority_sid";
         assert!(session_try_lock_on(&conn, sid, "agent", false));
         assert_eq!(session_owner_on(&conn, sid).as_deref(), Some("agent"));
@@ -433,7 +434,8 @@ mod tests {
                 used_calls INTEGER NOT NULL DEFAULT 0,
                 active     INTEGER NOT NULL DEFAULT 0,
                 updated_ms INTEGER NOT NULL)",
-        ).unwrap();
+        )
+        .unwrap();
         quota_write_on(&conn, "cred_a", 7, 1);
         quota_write_on(&conn, "cred_b", 0, 0);
         // 同键再写 = upsert 覆盖（模拟第二次调用后的回落）
@@ -455,7 +457,8 @@ mod tests {
                 session_id TEXT PRIMARY KEY,
                 started_ms INTEGER NOT NULL,
                 expires_ms INTEGER NOT NULL)",
-        ).unwrap();
+        )
+        .unwrap();
         // 未过期租约（走正常写穿路径）
         lease_start_on(&conn, "s_alive", 60_000);
         // 已过期租约（直接注入历史行）

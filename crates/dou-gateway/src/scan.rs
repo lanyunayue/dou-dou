@@ -37,9 +37,20 @@ pub struct ScanOutcome {
 
 /// 高危脚本/混淆规则（特征库之外的第二道检查）。
 const SUSPICIOUS_PATTERNS: &[&str] = &[
-    "/bin/sh -c", "bash -c", "powershell -enc", "FromBase64String", "eval(base64",
-    "nc -e", "ncat -e", "mkfifo", "chmod +x /tmp", "curl -k |", "wget -qO- |",
-    "reverse shell", "/dev/tcp/", "base64 -d | sh",
+    "/bin/sh -c",
+    "bash -c",
+    "powershell -enc",
+    "FromBase64String",
+    "eval(base64",
+    "nc -e",
+    "ncat -e",
+    "mkfifo",
+    "chmod +x /tmp",
+    "curl -k |",
+    "wget -qO- |",
+    "reverse shell",
+    "/dev/tcp/",
+    "base64 -d | sh",
 ];
 
 /// 把 Windows 路径转成 WSL 路径（C:\... → /mnt/c/...）
@@ -69,7 +80,11 @@ pub fn scan_file(path: &Path) -> ScanOutcome {
     let rule_hit = script_rule_hit(&bytes);
 
     // 1. 先试 Windows 本机 clamscan
-    if let Ok(out) = Command::new("clamscan").arg("--no-summary").arg(path).output() {
+    if let Ok(out) = Command::new("clamscan")
+        .arg("--no-summary")
+        .arg(path)
+        .output()
+    {
         let code = out.status.code().unwrap_or(0);
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let infected = code == 1;
@@ -91,7 +106,14 @@ pub fn scan_file(path: &Path) -> ScanOutcome {
     // 2. 再试 WSL clamscan
     let wsl_path = to_wsl_path(path);
     if let Ok(out) = Command::new("wsl")
-        .args(["-d", "Ubuntu-22.04", "--exec", "clamscan", "--no-summary", &wsl_path])
+        .args([
+            "-d",
+            "Ubuntu-22.04",
+            "--exec",
+            "clamscan",
+            "--no-summary",
+            &wsl_path,
+        ])
         .output()
     {
         let code = out.status.code().unwrap_or(0);
@@ -108,7 +130,11 @@ pub fn scan_file(path: &Path) -> ScanOutcome {
         return ScanOutcome {
             engine: "clamav-wsl".into(),
             infected,
-            detail: if stdout.trim().is_empty() { stderr } else { stdout },
+            detail: if stdout.trim().is_empty() {
+                stderr
+            } else {
+                stdout
+            },
             disposition,
         };
     }

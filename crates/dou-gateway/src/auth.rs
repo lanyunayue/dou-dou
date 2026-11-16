@@ -22,8 +22,7 @@ pub fn data_dir() -> PathBuf {
 /// CSPRNG 十六进制串。OS 随机源不可用则拒绝签发可预测凭据。
 pub fn rand_hex(len: usize) -> String {
     let mut bytes = vec![0u8; (len + 1) / 2];
-    getrandom::fill(&mut bytes)
-        .expect("CSPRNG 不可用：拒绝签发可预测凭据（fail-closed）");
+    getrandom::fill(&mut bytes).expect("CSPRNG 不可用：拒绝签发可预测凭据（fail-closed）");
     let s: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     s[..len].to_string()
 }
@@ -74,8 +73,7 @@ static PAIRING: std::sync::Mutex<Option<(String, u64)>> = std::sync::Mutex::new(
 
 pub fn issue_pairing_code() -> String {
     let mut b = [0u8; 4];
-    getrandom::fill(&mut b)
-        .expect("CSPRNG 不可用：拒绝签发可预测配对码（fail-closed）");
+    getrandom::fill(&mut b).expect("CSPRNG 不可用：拒绝签发可预测配对码（fail-closed）");
     let code = format!("{:06}", u32::from_le_bytes(b) % 1_000_000);
     let exp = now_sec() + 60;
     *PAIRING.lock().unwrap_or_else(|e| e.into_inner()) = Some((code.clone(), exp));

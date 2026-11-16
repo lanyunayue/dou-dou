@@ -8,8 +8,8 @@
 //!
 //! 被动采集：命令原文、工作目录、进程号、GPU 占用、日志尾部；不要求用户改脚本。
 
-use sha2::{Digest, Sha256};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::store;
 
@@ -24,7 +24,9 @@ fn extract_dataset_path(cmd: &str) -> String {
     let tokens: Vec<&str> = cmd.split_whitespace().collect();
     tokens
         .iter()
-        .filter(|t| t.starts_with('/') || t.starts_with("./") || t.starts_with("../") || t.contains('/'))
+        .filter(|t| {
+            t.starts_with('/') || t.starts_with("./") || t.starts_with("../") || t.contains('/')
+        })
         .last()
         .copied()
         .unwrap_or("")
@@ -64,7 +66,12 @@ pub struct Context {
 
 impl Context {
     pub fn empty() -> Self {
-        Self { cwd: String::new(), pid: String::new(), gpu: String::new(), log_tail: String::new() }
+        Self {
+            cwd: String::new(),
+            pid: String::new(),
+            gpu: String::new(),
+            log_tail: String::new(),
+        }
     }
 
     /// 从聚合补采输出解析：`pwd\n---\nps 行\n---\ngpu 行`
@@ -74,7 +81,19 @@ impl Context {
         let ps_line = parts.next().unwrap_or("").trim().to_string();
         let gpu = parts.next().unwrap_or("").trim().to_string();
         let pid = ps_line.split_whitespace().next().unwrap_or("").to_string();
-        Self { cwd, pid, gpu, log_tail: log_tail.chars().rev().take(400).collect::<String>().chars().rev().collect() }
+        Self {
+            cwd,
+            pid,
+            gpu,
+            log_tail: log_tail
+                .chars()
+                .rev()
+                .take(400)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect(),
+        }
     }
 }
 

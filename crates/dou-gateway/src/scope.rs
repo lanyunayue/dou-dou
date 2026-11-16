@@ -58,20 +58,45 @@ pub fn default_scope(tier: &str, client_id: &str) -> Scope {
         "execute" => Scope {
             client_id: client_id.to_string(),
             hosts: vec![],
-            tools: vec!["session_list".into(), "read_file".into(), "exec".into(), "upload".into()],
+            tools: vec![
+                "session_list".into(),
+                "read_file".into(),
+                "exec".into(),
+                "upload".into(),
+            ],
             paths: vec!["~/projects".into()],
-            command_patterns: vec!["ls".into(), "cat".into(), "git status".into(), "tail".into(), "df".into()],
+            command_patterns: vec![
+                "ls".into(),
+                "cat".into(),
+                "git status".into(),
+                "tail".into(),
+                "df".into(),
+            ],
             approval_policy: "execute".into(),
-            quota: Quota { ttl_sec: 86400, max_calls: 200, concurrency: 1 },
+            quota: Quota {
+                ttl_sec: 86400,
+                max_calls: 200,
+                concurrency: 1,
+            },
         },
         "change" => Scope {
             client_id: client_id.to_string(),
             hosts: vec![],
-            tools: vec!["session_list".into(), "read_file".into(), "exec".into(), "upload".into(), "write".into()],
+            tools: vec![
+                "session_list".into(),
+                "read_file".into(),
+                "exec".into(),
+                "upload".into(),
+                "write".into(),
+            ],
             paths: vec!["~/projects".into()],
             command_patterns: vec![],
             approval_policy: "change".into(),
-            quota: Quota { ttl_sec: 86400, max_calls: 200, concurrency: 1 },
+            quota: Quota {
+                ttl_sec: 86400,
+                max_calls: 200,
+                concurrency: 1,
+            },
         },
         _ => Scope {
             client_id: client_id.to_string(),
@@ -80,7 +105,11 @@ pub fn default_scope(tier: &str, client_id: &str) -> Scope {
             paths: vec!["~/projects".into()],
             command_patterns: vec![],
             approval_policy: "observe".into(),
-            quota: Quota { ttl_sec: 86400, max_calls: 200, concurrency: 1 },
+            quota: Quota {
+                ttl_sec: 86400,
+                max_calls: 200,
+                concurrency: 1,
+            },
         },
     }
 }
@@ -118,22 +147,36 @@ pub fn verify_token(plain: &str) -> Option<Credential> {
     let mut stmt = conn
         .prepare("SELECT id, ciphertext, tier, scope_json, expires_at, revoked_at, created_at FROM credential WHERE ciphertext=?1 AND type='token'")
         .ok()?;
-    let row = stmt.query_row(rusqlite::params![token_hash], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, i64>(4)?,
-            r.get::<_, Option<i64>>(5)?,
-            r.get::<_, i64>(6)?,
-        ))
-    }).ok()?;
+    let row = stmt
+        .query_row(rusqlite::params![token_hash], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, Option<i64>>(5)?,
+                r.get::<_, i64>(6)?,
+            ))
+        })
+        .ok()?;
     let (id, token_hash, tier, scope_json, expires_at, revoked_at, created_at) = row;
-    if revoked_at.is_some() { return None; }
-    if crate::state::now_ms() > expires_at { return None; }
+    if revoked_at.is_some() {
+        return None;
+    }
+    if crate::state::now_ms() > expires_at {
+        return None;
+    }
     let scope: Scope = serde_json::from_str(&scope_json).ok()?;
-    Some(Credential { id, token_hash, tier, scope, expires_at, revoked_at, created_at })
+    Some(Credential {
+        id,
+        token_hash,
+        tier,
+        scope,
+        expires_at,
+        revoked_at,
+        created_at,
+    })
 }
 
 /// 吊销：写时间戳（epoch 毫秒），不删记录。
@@ -142,7 +185,8 @@ pub fn revoke_token(id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE credential SET revoked_at=?1 WHERE id=?2 AND revoked_at IS NULL",
         rusqlite::params![crate::state::now_ms(), id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -151,7 +195,10 @@ pub fn tool_allowed(scope: &Scope, tool: &str) -> bool {
 }
 
 pub fn path_allowed(scope: &Scope, path: &str) -> bool {
-    scope.paths.iter().any(|p| p == "*" || path.starts_with(p.trim_end_matches('/')))
+    scope
+        .paths
+        .iter()
+        .any(|p| p == "*" || path.starts_with(p.trim_end_matches('/')))
 }
 
 /// 列出当前有效凭据（不含明文）。

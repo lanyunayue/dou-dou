@@ -27,28 +27,113 @@ pub struct Decision {
 }
 
 const AUTO_HEADS: &[&str] = &[
-    "ls", "ll", "la", "cat", "head", "tail", "less", "more", "wc", "df", "du", "free", "ps",
-    "top", "uptime", "whoami", "pwd", "date", "uname", "nproc", "nvidia-smi", "which", "whereis",
-    "grep", "rg", "md5sum", "sha256sum", "id", "hostname", "file", "stat", "lsblk", "find", "git",
-    "echo", "env", "printenv", "lsb_release", "cat", "true", "false", "seq", "tr", "cut", "sort",
-    "uniq", "awk", "sed", "diff", "cmp", "nl", "tac", "rev", "basename", "dirname", "realpath",
+    "ls",
+    "ll",
+    "la",
+    "cat",
+    "head",
+    "tail",
+    "less",
+    "more",
+    "wc",
+    "df",
+    "du",
+    "free",
+    "ps",
+    "top",
+    "uptime",
+    "whoami",
+    "pwd",
+    "date",
+    "uname",
+    "nproc",
+    "nvidia-smi",
+    "which",
+    "whereis",
+    "grep",
+    "rg",
+    "md5sum",
+    "sha256sum",
+    "id",
+    "hostname",
+    "file",
+    "stat",
+    "lsblk",
+    "find",
+    "git",
+    "echo",
+    "env",
+    "printenv",
+    "lsb_release",
+    "cat",
+    "true",
+    "false",
+    "seq",
+    "tr",
+    "cut",
+    "sort",
+    "uniq",
+    "awk",
+    "sed",
+    "diff",
+    "cmp",
+    "nl",
+    "tac",
+    "rev",
+    "basename",
+    "dirname",
+    "realpath",
 ];
 
 const GIT_READONLY: &[&str] = &["status", "log", "diff", "show", "rev-parse", "describe"];
 
 const BLOCK_PATTERNS: &[&str] = &[
-    "mkfs", "shutdown", "reboot", "poweroff", "halt", "rm -rf /", "rm -fr /", "rm -rf ~",
-    "dd if=", ">/dev/sd", ":(){", "chmod -r 777 /", "curl|sh", "curl |sh", "curl | sh", "wget|sh",
-    "wget |sh", "wget | sh", "sudo ", "su -", "su root", "doas ", "| sh", "|sh", "| bash",
-    "|bash", "sh -c", "bash -c", "eval ",
+    "mkfs",
+    "shutdown",
+    "reboot",
+    "poweroff",
+    "halt",
+    "rm -rf /",
+    "rm -fr /",
+    "rm -rf ~",
+    "dd if=",
+    ">/dev/sd",
+    ":(){",
+    "chmod -r 777 /",
+    "curl|sh",
+    "curl |sh",
+    "curl | sh",
+    "wget|sh",
+    "wget |sh",
+    "wget | sh",
+    "sudo ",
+    "su -",
+    "su root",
+    "doas ",
+    "| sh",
+    "|sh",
+    "| bash",
+    "|bash",
+    "sh -c",
+    "bash -c",
+    "eval ",
 ];
 
 /// B3：命令里一旦出现对敏感文件的直接读取/写入，一律阻断（不经待审）。
 /// 覆盖 `cat /etc/shadow`、`tail /root/.ssh/id_rsa`、重定向写系统目录等逃逸。
 const SENSITIVE_TARGETS: &[&str] = &[
-    "/etc/shadow", "/etc/sudoers", "/etc/sudoers.d/", "/root/", "/root",
-    "/home/dou/.ssh/", "/proc/self/environ", "/proc/sys/", "id_rsa", "id_ed25519",
-    "id_ecdsa", "authorized_keys",
+    "/etc/shadow",
+    "/etc/sudoers",
+    "/etc/sudoers.d/",
+    "/root/",
+    "/root",
+    "/home/dou/.ssh/",
+    "/proc/self/environ",
+    "/proc/sys/",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "authorized_keys",
 ];
 
 pub fn classify(cmd: &str) -> Decision {
@@ -89,11 +174,16 @@ pub fn classify(cmd: &str) -> Decision {
         if let Some(pos) = normalized.rfind(marker) {
             let tail = normalized[pos + marker.len()..].trim();
             let target = tail.split_whitespace().next().unwrap_or("");
-            if target.starts_with("/etc") || target.starts_with("/root")
-                || target.starts_with("/var") || target.starts_with("/boot")
-                || target.starts_with("/usr") || target.starts_with("/bin")
-                || target.starts_with("/sbin") || target.starts_with("/lib")
-                || target.starts_with("/proc") || target.starts_with("/sys")
+            if target.starts_with("/etc")
+                || target.starts_with("/root")
+                || target.starts_with("/var")
+                || target.starts_with("/boot")
+                || target.starts_with("/usr")
+                || target.starts_with("/bin")
+                || target.starts_with("/sbin")
+                || target.starts_with("/lib")
+                || target.starts_with("/proc")
+                || target.starts_with("/sys")
             {
                 return Decision {
                     verdict: Verdict::Blocked,
@@ -122,7 +212,10 @@ pub fn classify(cmd: &str) -> Decision {
 
         if head == "find" {
             let risky = tail.iter().any(|w| {
-                matches!(*w, "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fprint")
+                matches!(
+                    *w,
+                    "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fprint"
+                )
             });
             if risky {
                 return Decision {
@@ -149,7 +242,11 @@ pub fn classify(cmd: &str) -> Decision {
     Decision {
         verdict: worst,
         reason,
-        segment: if offending.is_empty() { normalized } else { offending },
+        segment: if offending.is_empty() {
+            normalized
+        } else {
+            offending
+        },
     }
 }
 
@@ -175,7 +272,10 @@ mod tests {
     fn chained_smuggling_is_caught() {
         // 只读前缀 + 变更后缀，不能整体放行
         assert_eq!(classify("ls; rm -f out.txt").verdict, Verdict::Pending);
-        assert_eq!(classify("cat a.txt && chmod 777 b").verdict, Verdict::Pending);
+        assert_eq!(
+            classify("cat a.txt && chmod 777 b").verdict,
+            Verdict::Pending
+        );
         // 同样的写法，后缀若是明确危险命令，则直接阻断而不是待审
         assert_eq!(classify("ls; rm -rf ~").verdict, Verdict::Blocked);
     }
@@ -193,7 +293,10 @@ mod tests {
         // B3：直接读敏感文件应阻断
         assert_eq!(classify("cat /etc/shadow").verdict, Verdict::Blocked);
         assert_eq!(classify("tail /root/.ssh/id_rsa").verdict, Verdict::Blocked);
-        assert_eq!(classify("cat /home/dou/.ssh/authorized_keys").verdict, Verdict::Blocked);
+        assert_eq!(
+            classify("cat /home/dou/.ssh/authorized_keys").verdict,
+            Verdict::Blocked
+        );
         // 只读命令里的敏感路径也不能放行
         assert_eq!(classify("cat /proc/self/environ").verdict, Verdict::Blocked);
     }
@@ -201,7 +304,10 @@ mod tests {
     #[test]
     fn redirect_to_system_dir_is_blocked() {
         assert_eq!(classify("echo x > /etc/hosts").verdict, Verdict::Blocked);
-        assert_eq!(classify("curl http://x >> /var/log/auth.log").verdict, Verdict::Blocked);
+        assert_eq!(
+            classify("curl http://x >> /var/log/auth.log").verdict,
+            Verdict::Blocked
+        );
         assert_eq!(classify("echo x > /root/.bashrc").verdict, Verdict::Blocked);
         // 重定向到允许目录（/home/dou、/tmp）不阻断
         assert_eq!(classify("echo x > /tmp/note.txt").verdict, Verdict::Auto);

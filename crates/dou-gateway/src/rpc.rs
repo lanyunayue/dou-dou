@@ -63,5 +63,7 @@ fn build(status: StatusCode, payload: Value, session: Option<&str>) -> Response 
             builder = builder.header("mcp-session-id", v);
         }
     }
-    builder.body(Body::from(body)).unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR))
+    builder
+        .body(Body::from(body))
+        .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR))
 }

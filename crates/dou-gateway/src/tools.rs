@@ -85,7 +85,12 @@ pub fn list() -> Value {
     })
 }
 
-pub async fn call(st: &AppState, name: &str, args: &Value, cred: Option<&scope::Credential>) -> Value {
+pub async fn call(
+    st: &AppState,
+    name: &str,
+    args: &Value,
+    cred: Option<&scope::Credential>,
+) -> Value {
     // 作用域与配额校验（设备令牌场景；dev 兜底令牌为 None 不拦截）
     if let Some(c) = cred {
         let sc = &c.scope;
@@ -97,8 +102,16 @@ pub async fn call(st: &AppState, name: &str, args: &Value, cred: Option<&scope::
             _ => "",
         };
         if !scope::tool_allowed(sc, tool_key) {
-            audit::write(&st.audit, audit::event("agent", "scope_deny", "-", "denied",
-                json!({ "tool": name, "tool_key": tool_key })));
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "scope_deny",
+                    "-",
+                    "denied",
+                    json!({ "tool": name, "tool_key": tool_key }),
+                ),
+            );
             return text_result(&format!("tool `{name}` 不在当前凭据作用域内"), true);
         }
         // 配额：累计次数 + 并发上限
@@ -106,13 +119,29 @@ pub async fn call(st: &AppState, name: &str, args: &Value, cred: Option<&scope::
             let mut q = st.quota.lock().await;
             let (calls, active) = q.entry(c.id.clone()).or_insert((0, 0));
             if *calls >= sc.quota.max_calls as u64 {
-                audit::write(&st.audit, audit::event("agent", "quota_calls", "-", "denied",
-                    json!({ "cred": c.id, "max_calls": sc.quota.max_calls })));
+                audit::write(
+                    &st.audit,
+                    audit::event(
+                        "agent",
+                        "quota_calls",
+                        "-",
+                        "denied",
+                        json!({ "cred": c.id, "max_calls": sc.quota.max_calls }),
+                    ),
+                );
                 return text_result("凭据调用次数已达上限", true);
             }
             if *active >= sc.quota.concurrency as u64 {
-                audit::write(&st.audit, audit::event("agent", "quota_concurrency", "-", "denied",
-                    json!({ "cred": c.id, "concurrency": sc.quota.concurrency })));
+                audit::write(
+                    &st.audit,
+                    audit::event(
+                        "agent",
+                        "quota_concurrency",
+                        "-",
+                        "denied",
+                        json!({ "cred": c.id, "concurrency": sc.quota.concurrency }),
+                    ),
+                );
                 return text_result("凭据并发会话已达上限", true);
             }
             *calls += 1;
@@ -166,7 +195,10 @@ async fn session_list(st: &AppState) -> Value {
 
 async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value {
     let cmd = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
-    let session_id = args.get("session").and_then(|v| v.as_str()).unwrap_or("default");
+    let session_id = args
+        .get("session")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
 
     // A1 会话锁：代理调用被人占用时拒绝（人工优先）。
     if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
@@ -175,21 +207,43 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
 
     if let Some(sc) = scope {
         if !sc.command_patterns.is_empty()
-            && !sc.command_patterns.iter().any(|pat| cmd.starts_with(pat.trim_end_matches('*')))
+            && !sc
+                .command_patterns
+                .iter()
+                .any(|pat| cmd.starts_with(pat.trim_end_matches('*')))
         {
-            audit::write(&st.audit, audit::event("agent", "scope_cmd_deny", session_id, "denied",
-                json!({ "command": cmd })));
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "scope_cmd_deny",
+                    session_id,
+                    "denied",
+                    json!({ "command": cmd }),
+                ),
+            );
             return text_result("命令不在当前凭据的只读命令白名单内", true);
         }
     }
     // 会话租约：单次任务最长 30min，超期需重新配对。
     {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         let mut leases = st.leases.lock().await;
         match leases.get(session_id) {
             Some(start) if now.saturating_sub(*start) > crate::auth::LEASE_SECS => {
-                audit::write(&st.audit, audit::event("agent", "lease_expired", session_id, "denied",
-                    json!({ "lease_secs": crate::auth::LEASE_SECS })));
+                audit::write(
+                    &st.audit,
+                    audit::event(
+                        "agent",
+                        "lease_expired",
+                        session_id,
+                        "denied",
+                        json!({ "lease_secs": crate::auth::LEASE_SECS }),
+                    ),
+                );
                 return text_result("会话租约已超过 30 分钟，请重新配对接入", true);
             }
             None => {
@@ -200,8 +254,13 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
             _ => {}
         }
     }
-    let policy = scope.map(|s| s.approval_policy.clone()).unwrap_or_else(|| "execute".to_string());
-    let background = args.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+    let policy = scope
+        .map(|s| s.approval_policy.clone())
+        .unwrap_or_else(|| "execute".to_string());
+    let background = args
+        .get("background")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     // A2：仅当「显式传入 timeout_sec 且 >30」或「background 标志」才任务化；
     // 未传 timeout_sec 的默认同步执行不受影响。
     let explicit_timeout = args.get("timeout_sec").and_then(|v| v.as_u64());
@@ -233,10 +292,10 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
         policy::Verdict::Pending => {
             // A4：审批卡片四要素——命令原文已在 task，此处补目标路径 + 预计影响。
             let impact = estimate_impact(cmd);
-            let tid = st.taskhub.create_pending_with(
-                session_id, cmd, &decision.reason, &policy,
-                "", &impact, "",
-            ).await;
+            let tid = st
+                .taskhub
+                .create_pending_with(session_id, cmd, &decision.reason, &policy, "", &impact, "")
+                .await;
             text_result(
                 &json!({
                     "status": "pending_approval",
@@ -255,10 +314,18 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
             // 客户端断开后远端进程继续跑，可查状态、可终止。
             if long_running {
                 let impact = estimate_impact(cmd);
-                let tid = st.taskhub.create_pending_with(
-                    session_id, cmd, "background exec", &policy,
-                    "", &impact, "",
-                ).await;
+                let tid = st
+                    .taskhub
+                    .create_pending_with(
+                        session_id,
+                        cmd,
+                        "background exec",
+                        &policy,
+                        "",
+                        &impact,
+                        "",
+                    )
+                    .await;
                 // 直接标记 approved（策略已判 auto，无需人工批）
                 let _ = st.taskhub.decide(&tid, true, "auto-approved", false).await;
                 let hub = st.taskhub.clone();
@@ -284,17 +351,24 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
                         Err(e) => (String::new(), e, 127),
                     };
                     hub.finish(&tid2, stdout, stderr, code).await;
-                    audit::write(&audit, audit::event(
-                        "agent", "bg_exec_done", &tid2, if code == 0 { "done" } else { "failed" },
-                        json!({"command": cmd2, "exit_code": code}),
-                    ));
+                    audit::write(
+                        &audit,
+                        audit::event(
+                            "agent",
+                            "bg_exec_done",
+                            &tid2,
+                            if code == 0 { "done" } else { "failed" },
+                            json!({"command": cmd2, "exit_code": code}),
+                        ),
+                    );
                 });
                 return text_result(
                     &json!({
                         "status": "background_task",
                         "task_id": tid,
                         "hint": "用 dou.task_status 或 GET /tasks 查结果"
-                    }).to_string(),
+                    })
+                    .to_string(),
                     false,
                 );
             }
@@ -306,9 +380,13 @@ async fn exec(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
                 match conn.exec(cmd, Duration::from_secs(timeout_sec)).await {
                     Ok(out) => {
                         // 补采上下文：cwd / pid / GPU（计划书 F-24 被动采集）
-                        let probe = conn.exec(crate::snapshot::probe_command(), Duration::from_secs(10)).await;
+                        let probe = conn
+                            .exec(crate::snapshot::probe_command(), Duration::from_secs(10))
+                            .await;
                         let ctx = match probe {
-                            Ok(p) => crate::snapshot::Context::from_probe_output(&p.stdout, &out.stdout),
+                            Ok(p) => {
+                                crate::snapshot::Context::from_probe_output(&p.stdout, &out.stdout)
+                            }
                             Err(_) => crate::snapshot::Context::empty(),
                         };
                         let snap = crate::snapshot::record(session_id, None, cmd, &ctx, "")
@@ -415,24 +493,36 @@ fn check_remote_path(path: &str) -> Result<(), String> {
 
     // 归一化后做敏感前缀拒绝（用 starts_with 而非 contains，避免误伤合法路径）。
     let denied_prefix = [
-        "/etc/shadow", "/etc/sudoers", "/etc/sudoers.d/", "/root/", "/root",
-        "/home/dou/.ssh/", "/proc/self/environ", "/proc/sys/",
+        "/etc/shadow",
+        "/etc/sudoers",
+        "/etc/sudoers.d/",
+        "/root/",
+        "/root",
+        "/home/dou/.ssh/",
+        "/proc/self/environ",
+        "/proc/sys/",
     ];
     for d in &denied_prefix {
-        if normalized == *d || normalized.starts_with(&format!("{d}/")) || normalized.starts_with(d) {
+        if normalized == *d || normalized.starts_with(&format!("{d}/")) || normalized.starts_with(d)
+        {
             return Err(format!("路径越出作用域：{d} 类路径禁止代理访问"));
         }
     }
     // 私钥文件名拒绝（不论所在目录）。
     let fname = normalized.rsplit('/').next().unwrap_or("");
-    if fname.starts_with("id_rsa") || fname.starts_with("id_ed25519")
-        || fname.starts_with("id_ecdsa") || fname == "authorized_keys"
+    if fname.starts_with("id_rsa")
+        || fname.starts_with("id_ed25519")
+        || fname.starts_with("id_ecdsa")
+        || fname == "authorized_keys"
     {
         return Err(format!("私钥/授权文件禁止代理访问：{fname}"));
     }
     // 必须落在允许根下（归一化后比较）。
-    if !(normalized.starts_with("/home/dou/") || normalized.starts_with("/tmp/")
-        || normalized == "/etc/hostname" || normalized == "/etc/os-release" || normalized == "/etc/passwd")
+    if !(normalized.starts_with("/home/dou/")
+        || normalized.starts_with("/tmp/")
+        || normalized == "/etc/hostname"
+        || normalized == "/etc/os-release"
+        || normalized == "/etc/passwd")
     {
         return Err(format!("路径 {path} 越出允许根（/home/dou/、/tmp/）"));
     }
@@ -465,46 +555,86 @@ fn normalize_remote_path(path: &str) -> Result<String, String> {
 }
 
 async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value {
-    let session_id = args.get("session").and_then(|v| v.as_str()).unwrap_or("default");
+    let session_id = args
+        .get("session")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let start = args.get("start_line").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let end = args.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+    let end = args
+        .get("end_line")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
 
     if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
         return r;
     }
 
     if path.is_empty() {
-        return text_result(&json!({"status":"error","message":"path 不能为空"}).to_string(), true);
+        return text_result(
+            &json!({"status":"error","message":"path 不能为空"}).to_string(),
+            true,
+        );
     }
     if let Some(sc) = scope {
         if !scope::path_allowed(sc, path) {
-            audit::write(&st.audit, audit::event("agent", "scope_path_deny", session_id, "denied",
-                json!({ "path": path })));
-            return text_result(&json!({"status":"path_scope_denied","message":"路径不在当前凭据作用域内"}).to_string(), true);
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "scope_path_deny",
+                    session_id,
+                    "denied",
+                    json!({ "path": path }),
+                ),
+            );
+            return text_result(
+                &json!({"status":"path_scope_denied","message":"路径不在当前凭据作用域内"})
+                    .to_string(),
+                true,
+            );
         }
     }
     if let Err(e) = check_remote_path(path) {
-        return text_result(&json!({"status":"path_scope_denied","message":e}).to_string(), true);
+        return text_result(
+            &json!({"status":"path_scope_denied","message":e}).to_string(),
+            true,
+        );
     }
     let mut map = st.sessions.lock().await;
     let conn = match map.get_mut(session_id) {
         Some(c) => c,
-        None => return text_result(&json!({"status":"error","message":format!("session `{session_id}` 不存在")}).to_string(), true),
+        None => {
+            return text_result(
+                &json!({"status":"error","message":format!("session `{session_id}` 不存在")})
+                    .to_string(),
+                true,
+            )
+        }
     };
     match conn.remote_read(path, start, end, 512_000).await {
         Ok(out) => {
             audit::write(
                 &st.audit,
-                audit::event("agent", "read", session_id, if out.ok { "allowed" } else { "denied" },
-                    json!({"path": path, "bytes": out.bytes, "warning": out.warning})),
+                audit::event(
+                    "agent",
+                    "read",
+                    session_id,
+                    if out.ok { "allowed" } else { "denied" },
+                    json!({"path": path, "bytes": out.bytes, "warning": out.warning}),
+                ),
             );
             let mut j = serde_json::Map::new();
-            j.insert("status".into(), json!(if out.ok { "read" } else { "too_large" }));
+            j.insert(
+                "status".into(),
+                json!(if out.ok { "read" } else { "too_large" }),
+            );
             j.insert("path".into(), json!(path));
             j.insert("bytes".into(), json!(out.bytes));
             j.insert("content".into(), json!(out.content));
-            if let Some(w) = out.warning { j.insert("warning".into(), json!(w)); }
+            if let Some(w) = out.warning {
+                j.insert("warning".into(), json!(w));
+            }
             text_result(&Value::Object(j).to_string(), !out.ok)
         }
         Err(e) => {
@@ -515,43 +645,94 @@ async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
 }
 
 async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value {
-    let session_id = args.get("session").and_then(|v| v.as_str()).unwrap_or("default");
-    let remote = args.get("remote_path").and_then(|v| v.as_str()).unwrap_or("");
+    let session_id = args
+        .get("session")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    let remote = args
+        .get("remote_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let local_ref = args.get("local_ref").and_then(|v| v.as_str()).unwrap_or("");
     if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
         return r;
     }
     if remote.is_empty() || local_ref.is_empty() {
-        return text_result(&json!({"status":"error","message":"remote_path 与 local_ref 必填"}).to_string(), true);
+        return text_result(
+            &json!({"status":"error","message":"remote_path 与 local_ref 必填"}).to_string(),
+            true,
+        );
     }
     if let Some(sc) = scope {
         if !scope::path_allowed(sc, remote) {
-            audit::write(&st.audit, audit::event("agent", "scope_path_deny", session_id, "denied",
-                json!({ "path": remote })));
-            return text_result(&json!({"status":"path_scope_denied","message":"目标路径不在当前凭据作用域内"}).to_string(), true);
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "scope_path_deny",
+                    session_id,
+                    "denied",
+                    json!({ "path": remote }),
+                ),
+            );
+            return text_result(
+                &json!({"status":"path_scope_denied","message":"目标路径不在当前凭据作用域内"})
+                    .to_string(),
+                true,
+            );
         }
     }
     if let Err(e) = check_remote_path(remote) {
-        return text_result(&json!({"status":"path_scope_denied","message":e}).to_string(), true);
+        return text_result(
+            &json!({"status":"path_scope_denied","message":e}).to_string(),
+            true,
+        );
     }
     let local = std::path::Path::new(local_ref);
     let bytes = match std::fs::read(local) {
         Ok(b) => b,
-        Err(e) => return text_result(&json!({"status":"error","message":format!("读不到本机文件 {local_ref}: {e}")}).to_string(), true),
+        Err(e) => {
+            return text_result(
+                &json!({"status":"error","message":format!("读不到本机文件 {local_ref}: {e}")})
+                    .to_string(),
+                true,
+            )
+        }
     };
     if bytes.len() > 50 * 1024 * 1024 {
-        return text_result(&json!({"status":"error","message":"单文件超 50MB，请走任务化传输"}).to_string(), true);
+        return text_result(
+            &json!({"status":"error","message":"单文件超 50MB，请走任务化传输"}).to_string(),
+            true,
+        );
     }
     let mut map = st.sessions.lock().await;
     let conn = match map.get_mut(session_id) {
         Some(c) => c,
-        None => return text_result(&json!({"status":"error","message":format!("session `{session_id}` 不存在")}).to_string(), true),
+        None => {
+            return text_result(
+                &json!({"status":"error","message":format!("session `{session_id}` 不存在")})
+                    .to_string(),
+                true,
+            )
+        }
     };
     match conn.remote_put(&bytes, remote).await {
         Ok((n, digest)) => {
-            audit::write(&st.audit, audit::event("agent", "put", session_id, "allowed",
-                json!({"remote_path": remote, "bytes": n, "sha256": digest})));
-            text_result(&json!({"status":"put","remote_path": remote,"bytes": n,"sha256": digest}).to_string(), false)
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "put",
+                    session_id,
+                    "allowed",
+                    json!({"remote_path": remote, "bytes": n, "sha256": digest}),
+                ),
+            );
+            text_result(
+                &json!({"status":"put","remote_path": remote,"bytes": n,"sha256": digest})
+                    .to_string(),
+                false,
+            )
         }
         Err(e) => {
             let s = crate::errors::to_json(&e).to_string();
@@ -561,75 +742,127 @@ async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
 }
 
 async fn get(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value {
-    let session_id = args.get("session").and_then(|v| v.as_str()).unwrap_or("default");
-    let remote = args.get("remote_path").and_then(|v| v.as_str()).unwrap_or("");
+    let session_id = args
+        .get("session")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    let remote = args
+        .get("remote_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if let Some(r) = lock_denied(st, session_id, scope.is_some()) {
         return r;
     }
     if remote.is_empty() {
-        return text_result(&json!({"status":"error","message":"remote_path 必填"}).to_string(), true);
+        return text_result(
+            &json!({"status":"error","message":"remote_path 必填"}).to_string(),
+            true,
+        );
     }
     if let Some(sc) = scope {
         if !scope::path_allowed(sc, remote) {
-            audit::write(&st.audit, audit::event("agent", "scope_path_deny", session_id, "denied",
-                json!({ "path": remote })));
-            return text_result(&json!({"status":"path_scope_denied","message":"路径不在当前凭据作用域内"}).to_string(), true);
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "scope_path_deny",
+                    session_id,
+                    "denied",
+                    json!({ "path": remote }),
+                ),
+            );
+            return text_result(
+                &json!({"status":"path_scope_denied","message":"路径不在当前凭据作用域内"})
+                    .to_string(),
+                true,
+            );
         }
     }
     if let Err(e) = check_remote_path(remote) {
-        return text_result(&json!({"status":"path_scope_denied","message":e}).to_string(), true);
+        return text_result(
+            &json!({"status":"path_scope_denied","message":e}).to_string(),
+            true,
+        );
     }
     let mut map = st.sessions.lock().await;
     let conn = match map.get_mut(session_id) {
         Some(c) => c,
-        None => return text_result(&json!({"status":"error","message":format!("session `{session_id}` 不存在")}).to_string(), true),
+        None => {
+            return text_result(
+                &json!({"status":"error","message":format!("session `{session_id}` 不存在")})
+                    .to_string(),
+                true,
+            )
+        }
     };
     match conn.remote_get(remote).await {
         Ok((bytes, digest)) => {
             let dir = crate::sftp::quarantine_dir();
             let _ = std::fs::create_dir_all(&dir);
             let name = std::path::Path::new(remote)
-                .file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "download.bin".into());
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "download.bin".into());
             let dest = dir.join(format!("{}_{}", &digest[..8], name));
             let _ = std::fs::write(&dest, &bytes);
             // 隔离区静态扫描（计划书 4.3/4.10）：特征库 + 脚本规则双检
             let scan = crate::scan::scan_file(&dest);
             let scan_verdict = scan.disposition.as_str();
-            audit::write(&st.audit, audit::event("agent", "get", session_id, scan_verdict,
-                json!({"remote_path": remote, "bytes": bytes.len(), "sha256": digest,
-                       "local": dest, "scan_engine": scan.engine, "scan_detail": scan.detail})));
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "get",
+                    session_id,
+                    scan_verdict,
+                    json!({"remote_path": remote, "bytes": bytes.len(), "sha256": digest,
+                       "local": dest, "scan_engine": scan.engine, "scan_detail": scan.detail}),
+                ),
+            );
             if scan.infected {
                 // 感染即删，不让代理读到
                 let _ = std::fs::remove_file(&dest);
-                text_result(&json!({
-                    "status":"rejected_infected",
-                    "remote_path": remote,
-                    "bytes": bytes.len(),
-                    "sha256": digest,
-                    "scan_engine": scan.engine,
-                    "scan_detail": scan.detail,
-                    "disposition": scan_verdict,
-                    "note": "文件已在隔离区删除"
-                }).to_string(), true)
+                text_result(
+                    &json!({
+                        "status":"rejected_infected",
+                        "remote_path": remote,
+                        "bytes": bytes.len(),
+                        "sha256": digest,
+                        "scan_engine": scan.engine,
+                        "scan_detail": scan.detail,
+                        "disposition": scan_verdict,
+                        "note": "文件已在隔离区删除"
+                    })
+                    .to_string(),
+                    true,
+                )
             } else if scan.disposition == crate::scan::Disposition::Pending {
                 // 命中高危规则但未确诊：待人工审查，不自动落远端
-                text_result(&json!({
-                    "status":"pending_review",
-                    "remote_path": remote, "bytes": bytes.len(), "sha256": digest,
-                    "local_quarantine": dest.to_string_lossy(),
-                    "scan_engine": scan.engine, "scan_detail": scan.detail,
-                    "disposition": scan_verdict,
-                    "note": "命中高危脚本规则，待人工审查后再决定是否留用"
-                }).to_string(), false)
+                text_result(
+                    &json!({
+                        "status":"pending_review",
+                        "remote_path": remote, "bytes": bytes.len(), "sha256": digest,
+                        "local_quarantine": dest.to_string_lossy(),
+                        "scan_engine": scan.engine, "scan_detail": scan.detail,
+                        "disposition": scan_verdict,
+                        "note": "命中高危脚本规则，待人工审查后再决定是否留用"
+                    })
+                    .to_string(),
+                    false,
+                )
             } else {
-                text_result(&json!({
-                    "status":"get","remote_path": remote,"bytes": bytes.len(),
-                    "sha256": digest,
-                    "local_quarantine": dest.to_string_lossy(),
-                    "scan_engine": scan.engine,
-                    "scan_detail": scan.detail,
-                    "disposition": scan_verdict
-                }).to_string(), false)
+                text_result(
+                    &json!({
+                        "status":"get","remote_path": remote,"bytes": bytes.len(),
+                        "sha256": digest,
+                        "local_quarantine": dest.to_string_lossy(),
+                        "scan_engine": scan.engine,
+                        "scan_detail": scan.detail,
+                        "disposition": scan_verdict
+                    })
+                    .to_string(),
+                    false,
+                )
             }
         }
         Err(e) => {
@@ -649,8 +882,13 @@ fn estimate_impact(cmd: &str) -> String {
         "写入块设备/磁盘（高危）".to_string()
     } else if lower.contains("chmod") || lower.contains("chown") || lower.contains("chattr") {
         "修改文件权限/属主".to_string()
-    } else if lower.contains("pip install") || lower.contains("apt ") || lower.contains("apt-get")
-        || lower.contains("yum ") || lower.contains("npm install") || lower.contains("brew install") {
+    } else if lower.contains("pip install")
+        || lower.contains("apt ")
+        || lower.contains("apt-get")
+        || lower.contains("yum ")
+        || lower.contains("npm install")
+        || lower.contains("brew install")
+    {
         "安装软件包".to_string()
     } else if lower.contains("git push") || lower.contains("git commit") {
         "提交/推送代码".to_string()
@@ -683,16 +921,23 @@ fn lock_denied(st: &AppState, session_id: &str, is_agent: bool) -> Option<Value>
     }
     match crate::state::session_owner(session_id) {
         Some(owner) if owner == "human" => {
-            audit::write(&st.audit, audit::event(
-                "agent", "session_locked", session_id, "denied",
-                json!({ "owner": owner }),
-            ));
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "session_locked",
+                    session_id,
+                    "denied",
+                    json!({ "owner": owner }),
+                ),
+            );
             Some(text_result(
                 &json!({
                     "status": "session_locked",
                     "owner": owner,
                     "reason": "该会话正被人工占用，代理请求已拒绝，请等待人工释放"
-                }).to_string(),
+                })
+                .to_string(),
                 true,
             ))
         }
@@ -713,11 +958,20 @@ mod tests {
 
     #[test]
     fn normalize_folds_dotdot() {
-        assert_eq!(normalize_remote_path("/home/dou/projects/../../etc/shadow").unwrap(), "/home/etc/shadow");
-        assert_eq!(normalize_remote_path("/home/dou/a/./b//c").unwrap(), "/home/dou/a/b/c");
+        assert_eq!(
+            normalize_remote_path("/home/dou/projects/../../etc/shadow").unwrap(),
+            "/home/etc/shadow"
+        );
+        assert_eq!(
+            normalize_remote_path("/home/dou/a/./b//c").unwrap(),
+            "/home/dou/a/b/c"
+        );
         assert_eq!(normalize_remote_path("/tmp/./x/../y").unwrap(), "/tmp/y");
         // 三个 ../ 才回到根
-        assert_eq!(normalize_remote_path("/home/dou/projects/../../../etc/shadow").unwrap(), "/etc/shadow");
+        assert_eq!(
+            normalize_remote_path("/home/dou/projects/../../../etc/shadow").unwrap(),
+            "/etc/shadow"
+        );
     }
 
     #[test]

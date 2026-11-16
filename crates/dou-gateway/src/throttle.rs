@@ -168,10 +168,7 @@ fn failure_on(conn: &Connection, key: &str, cfg: &Config) -> Result<Option<i64>,
     let (locked_until, new_exp) = if failures >= cfg.max_failures {
         let shift = exp.clamp(0, MAX_BACKOFF_EXP) as u32;
         let factor = 1i64.checked_shl(shift).unwrap_or(i64::MAX);
-        let lock = cfg
-            .base_lock_ms
-            .saturating_mul(factor)
-            .min(cfg.max_lock_ms);
+        let lock = cfg.base_lock_ms.saturating_mul(factor).min(cfg.max_lock_ms);
         (now.saturating_add(lock), (exp + 1).min(MAX_BACKOFF_EXP))
     } else {
         (0, exp)

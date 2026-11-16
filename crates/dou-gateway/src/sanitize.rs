@@ -20,7 +20,9 @@ pub struct Sanitizer {
 
 fn config_path() -> std::path::PathBuf {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(base).join("dou").join("sanitize_rules.json")
+    std::path::PathBuf::from(base)
+        .join("dou")
+        .join("sanitize_rules.json")
 }
 
 impl Sanitizer {
@@ -40,12 +42,21 @@ impl Sanitizer {
 
     /// 从 sanitize_rules.json 读取追加规则；文件缺失或非法则保持默认，不阻断。
     fn load_extra_rules(&mut self) {
-        let Ok(text) = std::fs::read_to_string(config_path()) else { return };
-        let Ok(json) = serde_json::from_str::<Value>(&text) else { return };
+        let Ok(text) = std::fs::read_to_string(config_path()) else {
+            return;
+        };
+        let Ok(json) = serde_json::from_str::<Value>(&text) else {
+            return;
+        };
         let Some(arr) = json.as_array() else { return };
         for rule in arr {
-            let Some(pattern) = rule.get("pattern").and_then(|v| v.as_str()) else { continue };
-            let replacement = rule.get("replacement").and_then(|v| v.as_str()).unwrap_or("[REDACTED]");
+            let Some(pattern) = rule.get("pattern").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let replacement = rule
+                .get("replacement")
+                .and_then(|v| v.as_str())
+                .unwrap_or("[REDACTED]");
             if let Ok(re) = Regex::new(pattern) {
                 self.extra.push((re, replacement.to_string()));
             }
@@ -54,11 +65,20 @@ impl Sanitizer {
 
     pub fn sanitize(&self, text: &str) -> String {
         let mut s = text.to_string();
-        s = self.priv_key.replace_all(&s, "[REDACTED:PRIVATE KEY]").to_string();
-        s = self.aws_key.replace_all(&s, "[REDACTED:AWS KEY]").to_string();
+        s = self
+            .priv_key
+            .replace_all(&s, "[REDACTED:PRIVATE KEY]")
+            .to_string();
+        s = self
+            .aws_key
+            .replace_all(&s, "[REDACTED:AWS KEY]")
+            .to_string();
         s = self.bearer.replace_all(&s, "Bearer [REDACTED]").to_string();
         s = self.jwt.replace_all(&s, "[REDACTED:JWT]").to_string();
-        s = self.internal_ip.replace_all(&s, "[REDACTED:IP]").to_string();
+        s = self
+            .internal_ip
+            .replace_all(&s, "[REDACTED:IP]")
+            .to_string();
         s = self.ssh_path.replace_all(&s, "[REDACTED:PATH]").to_string();
         for (re, repl) in &self.extra {
             s = re.replace_all(&s, repl.as_str()).to_string();
@@ -68,7 +88,9 @@ impl Sanitizer {
 }
 
 impl Default for Sanitizer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -77,7 +99,9 @@ mod tests {
     #[test]
     fn redacts_private_key() {
         let s = Sanitizer::new();
-        let out = s.sanitize("-----BEGIN OPENSSH PRIVATE KEY-----\nxxx\n-----END OPENSSH PRIVATE KEY-----");
+        let out = s.sanitize(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nxxx\n-----END OPENSSH PRIVATE KEY-----",
+        );
         assert!(out.contains("[REDACTED:PRIVATE KEY]"));
         assert!(!out.contains("OPENSSH PRIVATE"));
     }

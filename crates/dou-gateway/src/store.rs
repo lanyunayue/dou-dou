@@ -164,7 +164,8 @@ pub fn close_session(id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE session SET status='closed', ended_at=?1 WHERE id=?2",
         params![now_ms(), id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -196,16 +197,15 @@ pub fn find_snapshot_by_fp(fingerprint: &str) -> Result<Option<serde_json::Value
     let mut stmt = conn
         .prepare("SELECT id, command, dataset_path, result_dir, collected_at FROM snapshot WHERE fingerprint=?1 ORDER BY collected_at DESC LIMIT 1")
         .map_err(|e| e.to_string())?;
-    let row = stmt
-        .query_row(params![fingerprint], |r| {
-            Ok(serde_json::json!({
-                "id": r.get::<_,String>(0)?,
-                "command": r.get::<_,String>(1)?,
-                "dataset_path": r.get::<_,String>(2)?,
-                "result_dir": r.get::<_,String>(3)?,
-                "collected_at": r.get::<_,i64>(4)?,
-            }))
-        });
+    let row = stmt.query_row(params![fingerprint], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_,String>(0)?,
+            "command": r.get::<_,String>(1)?,
+            "dataset_path": r.get::<_,String>(2)?,
+            "result_dir": r.get::<_,String>(3)?,
+            "collected_at": r.get::<_,i64>(4)?,
+        }))
+    });
     match row {
         Ok(v) => Ok(Some(v)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -236,7 +236,13 @@ pub fn list_rules(tier: Option<&str>) -> Result<Vec<serde_json::Value>, String> 
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-pub fn upsert_rule(id: &str, tier: &str, pattern: &str, action: &str, enabled: bool) -> Result<(), String> {
+pub fn upsert_rule(
+    id: &str,
+    tier: &str,
+    pattern: &str,
+    action: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let conn = open()?;
     conn.execute(
         "INSERT INTO policy_rule (id, tier, pattern, action, enabled, builtin)
@@ -250,13 +256,32 @@ pub fn upsert_rule(id: &str, tier: &str, pattern: &str, action: &str, enabled: b
 /// 内置规则初始化（只插一次）。
 pub fn seed_builtin_rules() -> Result<(), String> {
     let builtin = [
-        ("ro_ls", "observe", r"^(ls|pwd|df|du|git status|tail|cat|head|whoami|id|env)\b", "allow"),
-        ("write_chmod", "execute", r"^(chmod|chown|mv|cp|rm|mkdir|touch|apt|pip|npm|git push|git checkout)\b", "approve"),
-        ("delete_risk", "change", r"^(rm -rf|sudo|su|systemctl|iptables|mount|dd\b)", "deny"),
+        (
+            "ro_ls",
+            "observe",
+            r"^(ls|pwd|df|du|git status|tail|cat|head|whoami|id|env)\b",
+            "allow",
+        ),
+        (
+            "write_chmod",
+            "execute",
+            r"^(chmod|chown|mv|cp|rm|mkdir|touch|apt|pip|npm|git push|git checkout)\b",
+            "approve",
+        ),
+        (
+            "delete_risk",
+            "change",
+            r"^(rm -rf|sudo|su|systemctl|iptables|mount|dd\b)",
+            "deny",
+        ),
     ];
     for (id, tier, pattern, action) in builtin {
         let exists: i64 = open()?
-            .query_row("SELECT COUNT(*) FROM policy_rule WHERE id=?1", params![id], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM policy_rule WHERE id=?1",
+                params![id],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())?;
         if exists == 0 {
             let conn = open()?;

@@ -43,30 +43,43 @@ fn sha256_hex(data: &[u8]) -> String {
 
 /// 进程启动时调用：从已有 audit 文件末尾恢复最后一条 hash，保证链式连续。
 pub fn init_chain(path: &Path) {
-    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
     let last = text.lines().filter(|l| !l.is_empty()).last().unwrap_or("");
     let mut guard = LAST_HASH.lock().unwrap_or_else(|e| e.into_inner());
-    *guard = serde_json::from_str::<Value>(last)
-        .ok()
-        .and_then(|v| v.get("hash").and_then(|h| h.as_str().map(|s| s.to_string())));
+    *guard = serde_json::from_str::<Value>(last).ok().and_then(|v| {
+        v.get("hash")
+            .and_then(|h| h.as_str().map(|s| s.to_string()))
+    });
 }
 
 /// 校验整条链：返回 (ok, broken_index)。给 /audit/verify 用。
 pub fn verify_chain(path: &Path) -> (bool, usize) {
-    let Ok(text) = std::fs::read_to_string(path) else { return (true, 0) };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return (true, 0);
+    };
     let mut prev = "genesis".to_string();
     for (i, line) in text.lines().enumerate() {
-        if line.is_empty() { continue; }
-        let Ok(v) = serde_json::from_str::<Value>(line) else { return (false, i) };
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return (false, i);
+        };
         let stored_prev = v.get("prev_hash").and_then(|x| x.as_str()).unwrap_or("");
         let stored_hash = v.get("hash").and_then(|x| x.as_str()).unwrap_or("");
-        if stored_prev != prev { return (false, i) }
+        if stored_prev != prev {
+            return (false, i);
+        }
         // 重新算 hash：把 hash 字段剥掉再算
         let mut body = v.clone();
         body.as_object_mut().map(|m| m.remove("hash"));
         let body_str = serde_json::to_string(&body).unwrap_or_default();
         let recomputed = sha256_hex(body_str.as_bytes());
-        if recomputed != stored_hash { return (false, i) }
+        if recomputed != stored_hash {
+            return (false, i);
+        }
         prev = stored_hash.to_string();
     }
     (true, 0)
@@ -83,14 +96,20 @@ pub fn write(path: &Path, mut entry: Value) {
     // 算自己 hash
     let body_str = match serde_json::to_string(&entry) {
         Ok(s) => s,
-        Err(e) => { eprintln!("[audit] serialize failed: {e}"); return; }
+        Err(e) => {
+            eprintln!("[audit] serialize failed: {e}");
+            return;
+        }
     };
     let hash = sha256_hex(body_str.as_bytes());
     entry["hash"] = json!(hash);
 
     let line = match serde_json::to_string(&entry) {
         Ok(s) => s,
-        Err(e) => { eprintln!("[audit] serialize failed: {e}"); return; }
+        Err(e) => {
+            eprintln!("[audit] serialize failed: {e}");
+            return;
+        }
     };
 
     let res = OpenOptions::new()
@@ -103,7 +122,10 @@ pub fn write(path: &Path, mut entry: Value) {
     } else {
         let mut g = LAST_HASH.lock().unwrap_or_else(|e| e.into_inner());
         if let Ok(v) = serde_json::from_str::<Value>(&line) {
-            *g = v.get("hash").and_then(|h| h.as_str()).map(|s| s.to_string());
+            *g = v
+                .get("hash")
+                .and_then(|h| h.as_str())
+                .map(|s| s.to_string());
         }
     }
     // 并行写 SQLite
@@ -124,7 +146,9 @@ pub fn event(source: &str, action: &str, target: &str, verdict: &str, detail: Va
 
 /// 读最近 n 条审计（给 /audit 查询用）
 pub fn tail(path: &Path, n: usize) -> Vec<Value> {
-    let Ok(text) = std::fs::read_to_string(path) else { return vec![] };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return vec![];
+    };
     text.lines()
         .filter(|l| !l.is_empty())
         .rev()
@@ -138,16 +162,24 @@ pub fn tail(path: &Path, n: usize) -> Vec<Value> {
 
 /// 按时间范围与来源检索（计划书 F-27：按项目与时间检索）。
 pub fn query(path: &Path, since_ms: Option<u64>, source: Option<&str>, limit: usize) -> Vec<Value> {
-    let Ok(text) = std::fs::read_to_string(path) else { return vec![] };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return vec![];
+    };
     text.lines()
         .filter(|l| !l.is_empty())
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter(|v| {
             if let (Some(since), Some(ts)) = (since_ms, v.get("ts_ms").and_then(|x| x.as_str())) {
-                if let Ok(t) = ts.parse::<u64>() { if t < since { return false; } }
+                if let Ok(t) = ts.parse::<u64>() {
+                    if t < since {
+                        return false;
+                    }
+                }
             }
             if let Some(src) = source {
-                if v.get("source").and_then(|x| x.as_str()) != Some(src) { return false; }
+                if v.get("source").and_then(|x| x.as_str()) != Some(src) {
+                    return false;
+                }
             }
             true
         })
@@ -167,13 +199,17 @@ pub fn sqlite_path() -> std::path::PathBuf {
 /// 审计条目数。空库时 `verify_chain` 会返回 `(true, 0)`，
 /// 必须配合本函数区分「空链未验证」与「链已校验通过」，避免 M2 出口假通过。
 pub fn entry_count(path: &Path) -> usize {
-    let Ok(text) = std::fs::read_to_string(path) else { return 0 };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return 0;
+    };
     text.lines().filter(|l| !l.trim().is_empty()).count()
 }
 
 /// 初始化 SQLite 表（只建一次）
 pub fn init_sqlite() {
-    let Ok(conn) = crate::state::open_conn() else { return };
+    let Ok(conn) = crate::state::open_conn() else {
+        return;
+    };
     let _ = conn.execute(
         "CREATE TABLE IF NOT EXISTS audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,7 +229,9 @@ pub fn init_sqlite() {
 
 /// 写 SQLite（和 JSONL 并行）
 pub fn write_sqlite(entry: &Value) {
-    let Ok(conn) = crate::state::open_conn() else { return };
+    let Ok(conn) = crate::state::open_conn() else {
+        return;
+    };
     let _ = conn.execute(
         "INSERT INTO audit (ts_ms, trace_id, source, action, target, verdict, detail, prev_hash, hash)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
