@@ -11,7 +11,7 @@
 
 | 项 | 状态 | 指向 |
 |---|---|---|
-| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `c5808ae`（2026-11-16 本会话 S3 视觉精致化：暗色标题栏/对比度/主操作视觉/空态禁用） |
+| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `906642d`（2026-11-16 MobaXterm 三能力：密码认证兜底/本地 Shell 降级标签/主机监控条） |
 | 网关真源 | ✅ `dou-handover-20261113-2139\dou-workspace`（`crates/dou-gateway`），git 干净 | HEAD `bc29000`（2026-11-16 本会话 S3 网关支撑：/policy/rules+/snapshots+audit 判定过滤） |
 | 废弃镜像 | `dou-workspace/app/` 已标 DEPRECATED，不在其上开发 | commit `67be637` |
 | 回滚点 | 🔴 `_backup-20261113-2350`（恢复 git 前快照，207 文件）勿动 | 磁盘体检报告 |
@@ -38,7 +38,7 @@
 | 交接包全量 | `& "C:\Program Files\Git\bin\bash.exe" verify.sh`（在包根目录） | 28 项判据 | ✅ 2026-11-16 复跑：25 PASS + 1 FAIL（rustfmt 回归）→ 修复后 **26 PASS** → B1/D2 后 **27 PASS** → D1 后 **28 PASS / 0 FAIL**（step 10 分层检查并入） |
 | 环境自检 | `powershell -ExecutionPolicy Bypass -File .\scripts\env-check.ps1`（dou-app 内） | 21/21 ALL OK | ✅ 2026-11-14 |
 | 客户端构建 | `cargo build`（dou-app/src-tauri） | 0 error | ✅ 2026-11-16（verify §5） |
-| 客户端单测 | `cargo test --lib` | 11 passed | ✅ 2026-11-16（verify §5） |
+| 客户端单测 | `cargo test --lib` | 14 passed（vault 11 + monitor 3） | ✅ 2026-11-16（verify §5） |
 | 客户端静态 | `cargo clippy --all-targets` / `cargo fmt --check` | 0 警告 / 0 差异（fmt 回归已修） | ✅ 2026-11-16 |
 | 网关测试 | `cargo test -p dou-gateway`（本机默认工具链即 GNU） | 54 passed | ✅ 2026-11-16 本会话实测（36→44→50（B1）→54（S3 网关支撑），S3 前端批次后回归 54/54 零回归） |
 | 前端类型 | `vue-tsc --noEmit` | 0 error（含 spec 文件） | ✅ 2026-11-16（verify §6，D2 后含 vitest 测试文件） |
@@ -77,6 +77,15 @@
 - **设计决策**：files 变体保留 sshError 独立一行（不并入标题行）——sshError 是 fail-closed 的真实原因展示，230px 窄面板下单行会截断，两行式为信息密度与可读性的平衡点。
 - **复验**：`npm run build`（分层 43 文件 0 违规 + vue-tsc + vite）通过；前端单测 16/16；第二轮复核（截图 `app-window-s3-refined.png` / `app-window-s3-final.png`）确认四项建议全部落地、空态禁用色正确。
 
+### §3 追记（2026-11-16 第六轮：MobaXterm 三能力对齐）
+
+- **能力 1 密码认证兜底**（dou-app `906642d`）：`ssh.rs` 拆出公共拨号层 `ssh_dial`，新增 `ssh_connect_with_password`；密码经 `Zeroizing<String>` 全程内存驻留（不落盘、不写日志）；`lib.rs open_pty` 新增 `password: Option<String>` 入参（空→None 走密钥）；保险库 `VaultTarget` 加 `auth` 字段（`serde(default)` 兼容旧库），密码模式目标只存地址与认证方式，`vault_test_connect` 密码分支用后即弃。前端：TerminalPanel 工具条认证方式下拉 + 密码框（内存 ref），ConnectionsPanel 密码模式入库与「密码连接」内联表单（提交后立即清空）。
+- **能力 2 本地 Shell 降级标签**：`pty.rs open_local_pty` spawn 本机 PowerShell（UTF-8 管道模式、kill_on_drop），stdin/stdout/stderr 桥接既有 `pty_data`/`pty_write` 通道；前端「本地 Shell」按钮，靶机不可达时终端仍可用（真窗口实测：标签激活、`PS C:\Users\PC>` 提示符正常、Rust 日志 `[pty] open_local_pty (powershell)`）。
+- **能力 3 主机监控条（无 agent）**：新增 `src-tauri/src/monitor.rs`（5s 周期，单次 exec 内嵌两次 `/proc/stat` 采样求 CPU、`/proc/meminfo` 内存、`/proc/net/dev` 字节差求速率），`host_stats`/`host_stats_off` 事件驱动前端薄监控条（CPU/内存迷你仪表 + 网速 + 运行时长，无会话自动隐藏）；russh 0.65 `Handle` 不可 Clone（`channel_open_session` 仅需 `&self`），pty 与监控以 `Arc<DouHandle>` 共享会话句柄（Drop 仅打日志不断连，会话存活由 Channel 保持）。
+- **顺带修复**：多标签共用单容器导致终端纵向堆叠——`showActiveTerm` 按 activeSid 切换 xterm element 显隐并重排 fit（随标签保存 FitAddon）。
+- **环境边界**：本机 127.0.0.1:22 无 sshd 监听且私钥不存在，密码认证的「连接成功」全链路与监控条真实数据留待靶机就绪后逐屏验收（S1-2）；解析逻辑由 monitor 3 例单测 + 回环自校验 10/10 覆盖。
+- **复验**：verify.sh **28 PASS / 0 FAIL**（`cargo test --lib` 14/14、clippy 0 警告、fmt 0 差异、vue-tsc 0 error、前端 16/16、分层 0 违规、命令契约无缺失）；新增 UIA 点击工具 `d:\dou\scripts\uia-click.ps1`（UIAutomation 按名称点按钮，配 capture-window.ps1 构成真窗口交互验证链）。
+
 ## 4. 功能工单现状（S0→S4 视角，详见 接下来计划-20261115.md §3）
 
 | 工单 | 状态 | 指向 |
@@ -97,6 +106,7 @@
 | S3 五页面/四态/设计 token/无障碍 | ✅ 本会话闭环（网关支撑 `bc29000` + 前端 `f6b7eac`/`31da434`/`f9a7119`/`c3ff73b`；判据：侧栏同级可达 13 项、连接管理 3 步新增主机、审计三维检索导出、六类高亮、C4 可跳转） | §3 追记第四轮 |
 | S3 视觉精致化（复核驱动） | ✅ 本会话提交（`c5808ae`：暗色标题栏/对比度提亮/保存主操作视觉/空态禁用/离线提示减重复） | §3 追记第五轮 |
 | S3-验证 真窗口视觉复核 | ✅ 本会话闭环（两轮截屏复核 + 精致化批次落地 + 设计决策登记；截图 `app-window-s3-final.png`） | §3 追记第五轮 |
+| MobaXterm 三能力（密码兜底/本地 Shell/监控条） | ✅ 本会话提交（dou-app `906642d`：Rust 三层 + 前端接线 + 真窗口验证本地 Shell 与监控空态；密码全链路待靶机就绪） | §3 追记第六轮 |
 | S4 打包/内测 | ⏸ 等外部条件（证书/靶机/样本/课题组），不承诺 | 接下来计划 §3 |
 
 ## 5. 网关安全硬约束（🔴 不改不放松）
