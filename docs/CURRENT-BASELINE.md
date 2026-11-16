@@ -11,8 +11,8 @@
 
 | 项 | 状态 | 指向 |
 |---|---|---|
-| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `7b7dce3`（2026-11-16 16:50 审批卡片四要素） |
-| 网关真源 | ✅ `dou-handover-20261113-2139\dou-workspace`（`crates/dou-gateway`），git 干净 | HEAD `2f47bf4`（2026-11-16 16:50 A线A1-A4+B3） |
+| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `18ff118`（2026-11-16 本会话 D2 覆盖率门槛+useApproval 单测） |
+| 网关真源 | ✅ `dou-handover-20261113-2139\dou-workspace`（`crates/dou-gateway`），git 干净 | HEAD `76b8457`（2026-11-16 本会话 B1 私钥本地加密库） |
 | 废弃镜像 | `dou-workspace/app/` 已标 DEPRECATED，不在其上开发 | commit `67be637` |
 | 回滚点 | 🔴 `_backup-20261113-2350`（恢复 git 前快照，207 文件）勿动 | 磁盘体检报告 |
 | 仓库外旧副本 | ⚠️ 根目录 `dou-app\`、`dou-workspace\` 为**旧版本非 git 副本**（2026-11-16 17:51~18:10 落盘，来历未记录），不作为任何依据 | 本会话哈希比对：15 抽 13 与仓库不一致且更旧 |
@@ -35,17 +35,18 @@
 
 | 检查 | 命令 | 结果 | 判定 |
 |---|---|---|---|
-| 交接包全量 | `& "C:\Program Files\Git\bin\bash.exe" verify.sh`（在包根目录） | 26 项判据 | ✅ 2026-11-16 复跑：25 PASS + 1 FAIL（rustfmt 回归），**已修**，修复后复跑见 §3 追记 |
+| 交接包全量 | `& "C:\Program Files\Git\bin\bash.exe" verify.sh`（在包根目录） | 27 项判据 | ✅ 2026-11-16 复跑：25 PASS + 1 FAIL（rustfmt 回归）→ 修复后 **26 PASS** → 本会话（含 B1/D2 后）**27 PASS / 0 FAIL** |
 | 环境自检 | `powershell -ExecutionPolicy Bypass -File .\scripts\env-check.ps1`（dou-app 内） | 21/21 ALL OK | ✅ 2026-11-14 |
 | 客户端构建 | `cargo build`（dou-app/src-tauri） | 0 error | ✅ 2026-11-16（verify §5） |
 | 客户端单测 | `cargo test --lib` | 11 passed | ✅ 2026-11-16（verify §5） |
 | 客户端静态 | `cargo clippy --all-targets` / `cargo fmt --check` | 0 警告 / 0 差异（fmt 回归已修） | ✅ 2026-11-16 |
-| 网关测试 | `cargo +gnu test -p dou-gateway` | 36 passed | 📄 WorkBuddy 2026-11-16 记录（本会话未独立复跑，待 §6 A5 验证时一并复跑） |
-| 前端类型 | `vue-tsc --noEmit` | 0 error | ✅ 2026-11-16（verify §6） |
-| 前端构建 | `npm run build` | 73 模块 | ✅ 2026-11-14；A4 改动后待复跑 |
+| 网关测试 | `cargo test -p dou-gateway`（本机默认工具链即 GNU） | 50 passed（A5/B2/B3/B1 单测并入） | ✅ 2026-11-16 本会话实测（36→44→50，B1 后 50/50） |
+| 前端类型 | `vue-tsc --noEmit` | 0 error（含 spec 文件） | ✅ 2026-11-16（verify §6，D2 后含 vitest 测试文件） |
+| 前端构建 | `npm run build` | 73 模块 | ✅ 2026-11-14；A4/D2 改动后待复跑 |
+| 前端单测 | `npm run test`（dou-app） | 12 passed（useApproval 首批） | ✅ 2026-11-16 本会话（verify §9） |
 | 命令契约 | `python tools/verify-invoke.py` | 25 条无缺失 | ✅ 2026-11-16（verify §7） |
 | SSH 主线 | `cargo run --bin dou-ssh-selfcheck` | 10/10（TOFU、公钥认证、分块传输、断点续传、密钥变更拒绝） | ✅ 2026-11-16（verify §8） |
-| **真窗口** | `npm run tauri dev` | 窗口存在 + 内容区非白屏 + 无崩溃 | ⏸ **白屏修复后未复验过**（11-15 截图为白屏态） |
+| **真窗口** | `npm run tauri dev` | 窗口存在（1320×1000、标题「豆Dou」）+ 内容区非白屏 + 无崩溃 | ✅ 2026-11-16 本会话实测（截图 `d:\dou\app-window-20261116-postfix.png`；靶机未连接空态属功能性异常非渲染异常） |
 
 ### §3 追记（2026-11-16 第二轮）
 
@@ -58,17 +59,17 @@
 |---|---|---|
 | S0-1 29 项改动收口 | ✅ 完成 | 11-16 16:50 四笔 commit，两仓 `git status` 干净 |
 | S0-3 C 盘清理剩余 4 项 | ⏸ 可选不阻塞（DxcCache 4.99G / SoftwareDistribution 0.78G / sdkusage.csv 0.63G / npm-cache 0.91G） | 体检报告 |
-| S1-1 真窗口启动 | ⏸ 白屏已修但未复验 | 本表 §3 真窗口行 |
+| S1-1 真窗口启动 | ✅ 本会话实测 | §3 真窗口行（截图 app-window-20261116-postfix.png） |
 | S1-2 逐屏交互验收 | ⏸ 需用户在机器前（AC-01/02/03/06/09） | 接下来计划 §3 |
 | A1 会话锁 / A2 长命令任务化 / A3 审批超时 | ✅ 已提交 | commit 2f47bf4；E2E 📄 WorkBuddy（blocked/path_scope_denied 用例过） |
 | A4 审批卡片四要素 | ✅ 已提交（后端+前端展示） | commit 7b7dce3 |
-| A4 前端断连置顶 + 人工终止 | 🟡 本会话已实现，⏸ 待 vue-tsc/真窗口复验后入库 | `useApproval.ts` / `ApprovalPanel.vue` |
-| A5 配额/租约持久化 | ⏸ 未开工（B1 依赖它） | PLAN-V2 W-24 |
-| B1 私钥本地加密库 | ⏸ 未开工（保险库三缺陷修复 ≠ B1 全量判据，需对照复核） | PLAN-V2 W-25 |
-| B2 指纹变更二次确认 | 🟡 后端 TOFU/变更拒绝已实测（ssh-loopback 10/10），UI 闭环待对照复核 | PLAN-V2 W-23 |
-| B3 逃逸加固 | 🟡 词法归一化已提交，**真实 symlink 解析未实现** | commit 2f47bf4；WorkBuddy 待办 |
-| D2 覆盖率门槛入脚本 | ⏸ 未开工（必须先于 D1） | PLAN-V2 W-30 |
-| D1 分层目录重构 | ⏸ 未开工 | PLAN-V2 W-29 |
+| A4 前端断连置顶 + 人工终止 | ✅ 本会话提交（3e1a31a）；D2 单测又修复其「失联窗口判定」死代码 bug（18ff118） | `useApproval.ts`（classifyOrphans 参数化） |
+| A5 配额/租约持久化 | ✅ 本会话提交 | dou-workspace `856aba6`（写穿三接线 + 启动恢复）+ fmt 归一 `118c1e2` |
+| B1 私钥本地加密库 | ✅ 本会话提交（全量判据满足：密文+盐落库 / 无明文读接口 / 落库检索无明文） | dou-workspace `76b8457`（vault.rs，50/50） |
+| B2 指纹变更二次确认 | ✅ 本会话闭环（网关 /hostkey/list+forget + 前端终端/网关两库遗忘 + mismatch 指引） | dou-workspace `1cf8643` + dou-app `4cd89dc` |
+| B3 逃逸加固 | ✅ 本会话提交（SFTP REALPATH 协议级 symlink 真实解析，三通道统一闸门，put 拒写穿） | dou-workspace `16723a9` |
+| D2 覆盖率门槛入脚本 | ✅ 观察期达成（vitest+coverage-v8 已入 verify.sh step 9，WARN 判定；门槛 核心≥70%/全量≥40% 当前 11.1%/11%，未达标不 FAIL） | dou-app `18ff118` |
+| D1 分层目录重构 | ⏸ 未开工（S2 唯一剩余项） | PLAN-V2 W-29 |
 | S3 五页面/四态/设计 token/无障碍 | ⏸ 未开工（可与 S2 并行） | PLAN-V2 R2 |
 | S4 打包/内测 | ⏸ 等外部条件（证书/靶机/样本/课题组），不承诺 | 接下来计划 §3 |
 
