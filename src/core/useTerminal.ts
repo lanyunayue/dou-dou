@@ -85,23 +85,33 @@ export async function connectSsh(o: ConnectOptions) {
 }
 
 // 会话落地共用件：创建 xterm、写欢迎行、注册键盘写入、入 tabs（连接表单/档案连接/本地 Shell 共用）
+// R4：fit 产生的 resize 一律上报 pty_resize（ConPTY 会话同步尺寸，其余模式 Rust 侧 no-op）
 function attachSession(sid: string, title: string, welcome: string, extra?: Partial<TerminalTab>) {
   const { term, fit } = createTerm()
   term.write(welcome)
   term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
+  term.onResize(({ cols, rows }) => { void invoke('pty_resize', { sid, cols, rows }).catch(()=>{}) })
   tabs.value.push({ sid, title, term, fit, ...extra })
   activeSid.value = sid
   showConnectForm.value = false
   showActiveTerm()
 }
 
-// 本地 Shell（学 MobaXterm 的 Local terminal）：无需远程主机，本机 PowerShell 直开
+// 本地 Shell（学 MobaXterm 的 Local terminal）：无需远程主机，本机 PowerShell 直开。
+// R4：Rust 优先 ConPTY 真终端（vim/htop/resize 不乱），系统不支持时回退管道模式——
+// 标题与欢迎行标注「基础模式」，提醒用户画面交互受限。
 export async function openLocalTab() {
   try {
-    const sid = await invoke('open_local_pty') as string
+    const r = await invoke<{ sid: string, mode: 'conpty' | 'pipe' }>('open_local_pty')
     sshError.value = ''
-    attachSession(sid, '本地 Shell', '[本地 Shell（Windows PowerShell，管道模式）]\r\n', { local: true })
-    audit.value.unshift(`[${new Date().toLocaleTimeString()}] 打开本地 Shell ${sid.slice(0,8)}`)
+    const isConpty = r.mode === 'conpty'
+    attachSession(
+      r.sid,
+      isConpty ? '本地 Shell' : '本地 Shell（基础模式）',
+      `[本地 Shell（Windows PowerShell · ${isConpty ? 'ConPTY 真终端' : '基础模式：系统不支持 ConPTY，画面交互受限'}）]\r\n`,
+      { local: true }
+    )
+    audit.value.unshift(`[${new Date().toLocaleTimeString()}] 打开本地 Shell ${r.sid.slice(0,8)}（${isConpty ? 'ConPTY' : '管道'}模式）`)
   } catch (e: any) {
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 本地 Shell 启动失败：${String(e?.message ?? e).slice(0, 80)}`)
   }

@@ -137,8 +137,19 @@ async fn open_pty(
 async fn open_local_pty(
     app: tauri::AppHandle,
     state: tauri::State<'_, PtyState>,
-) -> Result<String, String> {
+) -> Result<serde_json::Value, String> {
     pty::open_local_pty(app, &state).await
+}
+
+/// R4：xterm 尺寸 → ConPTY（ResizePseudoConsole）。仅 ConPTY 会话生效。
+#[tauri::command]
+async fn pty_resize(
+    state: tauri::State<'_, PtyState>,
+    sid: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    pty::pty_resize(&state, &sid, cols, rows).await
 }
 
 #[tauri::command]
@@ -406,6 +417,7 @@ pub fn run() {
             tq_resume,
             tq_clear,
             sync_folders,
+            pty_resize,
             vault_init,
             vault_unlock,
             vault_lock,
