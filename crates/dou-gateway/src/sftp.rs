@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::OpenFlags;
+use russh_sftp::protocol::{FileAttributes, OpenFlags};
 
 use crate::ssh::SshConnection;
 
@@ -52,6 +52,25 @@ impl SshConnection {
         SftpSession::new(channel.into_stream())
             .await
             .map_err(|e| format!("sftp session: {e}"))
+    }
+
+    /// B3：symlink 真实解析（SFTP REALPATH，协议级，无 shell 注入面）。
+    /// 对 symlink 链一路解析到最终目标；目标不存在时返回 Err。
+    pub async fn remote_realpath(&mut self, path: &str) -> Result<String, String> {
+        let sftp = self.open_sftp().await?;
+        sftp.canonicalize(path)
+            .await
+            .map_err(|e| format!("realpath {path}: {e}"))
+    }
+
+    /// B3：lstat（不跟随末级 symlink）。Ok(None) = 目标不存在。
+    /// 仅用于 put 前的「目标是符号链接」判定；存在性权威判定交给 canonicalize。
+    pub async fn remote_lstat(&mut self, path: &str) -> Result<Option<FileAttributes>, String> {
+        let sftp = self.open_sftp().await?;
+        match sftp.symlink_metadata(path).await {
+            Ok(meta) => Ok(Some(meta)),
+            Err(_) => Ok(None),
+        }
     }
 
     /// 读远端文件，按行区间返回。

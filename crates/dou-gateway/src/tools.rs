@@ -529,6 +529,68 @@ fn check_remote_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// B3 第二步：symlink 真实解析的决策核心（纯函数，可单测）。
+/// 词法归一化挡不住「合法路径下的 symlink 指向墙外」——`/home/dou/link` 词法
+/// 完全合法，但它可能指向 /etc/shadow。远端 canonicalize 求出真实路径后，
+/// 对真实路径重跑同一套 check_remote_path。
+fn check_resolved_remote_path(requested: &str, resolved: &str) -> Result<(), String> {
+    check_remote_path(resolved)
+        .map_err(|e| format!("symlink 解析后越界：{requested} → {resolved}：{e}"))
+}
+
+/// 词法父目录（不访问文件系统）。根路径自身返回 None。
+fn lexical_parent(path: &str) -> Option<String> {
+    let trimmed = path.trim_end_matches('/');
+    let idx = trimmed.rfind('/')?;
+    if idx == 0 {
+        Some("/".to_string())
+    } else {
+        Some(trimmed[..idx].to_string())
+    }
+}
+
+/// B3 读路径统一闸门：canonicalize → 复检 → 返回真实路径。
+/// 任何一步失败都视为拒绝（fail-closed），由调用方落审计并回 path_scope_denied。
+async fn resolve_for_read(
+    conn: &mut crate::ssh::SshConnection,
+    path: &str,
+) -> Result<String, String> {
+    let resolved = conn.remote_realpath(path).await?;
+    check_resolved_remote_path(path, &resolved)?;
+    Ok(resolved)
+}
+
+/// B3 写路径统一闸门（put）：目标若是符号链接直接拒绝（写穿链接即改写墙外
+/// 文件，无论目标在不在允许根内）；目标存在则按读路径复检；目标不存在则
+/// 复检父链后允许在真实父目录下新建。
+/// 返回实际应写入的路径（与请求一致，除非目标是已存在的真实路径）。
+async fn resolve_for_write(
+    conn: &mut crate::ssh::SshConnection,
+    path: &str,
+) -> Result<String, String> {
+    if let Some(meta) = conn.remote_lstat(path).await? {
+        if meta.is_symlink() {
+            return Err(format!(
+                "目标 {path} 是符号链接：put 拒绝写穿链接（防止改写墙外文件）"
+            ));
+        }
+    }
+    match conn.remote_realpath(path).await {
+        Ok(resolved) => {
+            check_resolved_remote_path(path, &resolved)?;
+            Ok(resolved)
+        }
+        Err(_) => {
+            // 目标不存在（或不可解析）：权威校验父链，父链合法才允许新建。
+            let parent =
+                lexical_parent(path).ok_or_else(|| format!("路径 {path} 无父目录，禁止写入"))?;
+            let presolved = conn.remote_realpath(&parent).await?;
+            check_resolved_remote_path(path, &presolved)?;
+            Ok(path.to_string())
+        }
+    }
+}
+
 /// B3 路径归一化：折叠 `..` / `.` / 重复斜杠，越出根目录时报错。
 /// 例：`/home/dou/projects/../../etc/shadow` → `/etc/shadow`（随后被敏感前缀拒绝）。
 fn normalize_remote_path(path: &str) -> Result<String, String> {
@@ -612,7 +674,27 @@ async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
             )
         }
     };
-    match conn.remote_read(path, start, end, 512_000).await {
+    // B3：symlink 真实解析——词法合法 ≠ 真实合法，链接指向墙外即拒。
+    let target = match resolve_for_read(conn, path).await {
+        Ok(r) => r,
+        Err(e) => {
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "read",
+                    session_id,
+                    "denied",
+                    json!({"path": path, "why": "symlink_or_realpath", "detail": e}),
+                ),
+            );
+            return text_result(
+                &json!({"status":"path_scope_denied","message":e}).to_string(),
+                true,
+            );
+        }
+    };
+    match conn.remote_read(&target, start, end, 512_000).await {
         Ok(out) => {
             audit::write(
                 &st.audit,
@@ -621,7 +703,7 @@ async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
                     "read",
                     session_id,
                     if out.ok { "allowed" } else { "denied" },
-                    json!({"path": path, "bytes": out.bytes, "warning": out.warning}),
+                    json!({"path": path, "resolved": target, "bytes": out.bytes, "warning": out.warning}),
                 ),
             );
             let mut j = serde_json::Map::new();
@@ -716,7 +798,28 @@ async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
             )
         }
     };
-    match conn.remote_put(&bytes, remote).await {
+    // B3：symlink 真实解析——目标是链接即拒（写穿链接=改写墙外文件）；
+    // 目标不存在则父链 canonicalize 复检后才允许新建。
+    let target = match resolve_for_write(conn, remote).await {
+        Ok(r) => r,
+        Err(e) => {
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "put",
+                    session_id,
+                    "denied",
+                    json!({"remote_path": remote, "why": "symlink_or_realpath", "detail": e}),
+                ),
+            );
+            return text_result(
+                &json!({"status":"path_scope_denied","message":e}).to_string(),
+                true,
+            );
+        }
+    };
+    match conn.remote_put(&bytes, &target).await {
         Ok((n, digest)) => {
             audit::write(
                 &st.audit,
@@ -725,7 +828,7 @@ async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
                     "put",
                     session_id,
                     "allowed",
-                    json!({"remote_path": remote, "bytes": n, "sha256": digest}),
+                    json!({"remote_path": remote, "resolved": target, "bytes": n, "sha256": digest}),
                 ),
             );
             text_result(
@@ -795,11 +898,31 @@ async fn get(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
             )
         }
     };
-    match conn.remote_get(remote).await {
+    // B3：symlink 真实解析——同 read，链接指向墙外即拒。
+    let target = match resolve_for_read(conn, remote).await {
+        Ok(r) => r,
+        Err(e) => {
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "agent",
+                    "get",
+                    session_id,
+                    "denied",
+                    json!({"remote_path": remote, "why": "symlink_or_realpath", "detail": e}),
+                ),
+            );
+            return text_result(
+                &json!({"status":"path_scope_denied","message":e}).to_string(),
+                true,
+            );
+        }
+    };
+    match conn.remote_get(&target).await {
         Ok((bytes, digest)) => {
             let dir = crate::sftp::quarantine_dir();
             let _ = std::fs::create_dir_all(&dir);
-            let name = std::path::Path::new(remote)
+            let name = std::path::Path::new(&target)
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "download.bin".into());
@@ -815,7 +938,7 @@ async fn get(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
                     "get",
                     session_id,
                     scan_verdict,
-                    json!({"remote_path": remote, "bytes": bytes.len(), "sha256": digest,
+                    json!({"remote_path": remote, "resolved": target, "bytes": bytes.len(), "sha256": digest,
                        "local": dest, "scan_engine": scan.engine, "scan_detail": scan.detail}),
                 ),
             );
@@ -1009,5 +1132,38 @@ mod tests {
         assert!(estimate_impact("rm -rf /data").contains("删除"));
         assert!(estimate_impact("pip install torch").contains("安装"));
         assert!(estimate_impact("git push origin").contains("提交"));
+    }
+
+    // ---------- B3：symlink 真实解析决策核心 ----------
+
+    #[test]
+    fn symlink_resolved_escape_is_blocked() {
+        // 请求词法合法，但真实目标越界 → 拒
+        assert!(check_resolved_remote_path("/home/dou/link", "/etc/shadow").is_err());
+        assert!(check_resolved_remote_path("/home/dou/link", "/root/secret").is_err());
+        assert!(check_resolved_remote_path("/tmp/x", "/etc/sudoers").is_err());
+        // 真实目标是个私钥（无论落在哪）→ 拒
+        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/.ssh/id_ed25519").is_err());
+        // 允许根外的一般路径 → 拒
+        assert!(check_resolved_remote_path("/home/dou/link", "/var/data/x").is_err());
+    }
+
+    #[test]
+    fn symlink_resolved_inside_root_is_allowed() {
+        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/data/train.log").is_ok());
+        assert!(check_resolved_remote_path("/tmp/x", "/tmp/note.txt").is_ok());
+        // 允许根内的白名单文件
+        assert!(check_resolved_remote_path("/home/dou/link", "/etc/os-release").is_ok());
+    }
+
+    #[test]
+    fn lexical_parent_walks_to_root() {
+        assert_eq!(
+            lexical_parent("/home/dou/sub/file.txt").as_deref(),
+            Some("/home/dou/sub")
+        );
+        assert_eq!(lexical_parent("/file.txt").as_deref(), Some("/"));
+        assert_eq!(lexical_parent("/").is_none(), true);
+        assert_eq!(lexical_parent("/tmp/dir/").as_deref(), Some("/tmp"));
     }
 }
