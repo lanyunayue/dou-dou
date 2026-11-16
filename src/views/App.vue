@@ -68,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
 import ErrorBanner from '../components/ErrorBanner.vue'
@@ -97,9 +97,11 @@ import { newTab, registerTerminalListener, registerWindowFocusListener } from '.
 import { registerTqListener } from '../core/useTransferQueue'
 import { registerHostKeyListener } from '../core/useHostKeys'
 import { loadFiles } from '../core/useFileTree'
+import { view as useNavView } from '../core/useNav'
 
 const navs = [{key:'term',label:'终端'},{key:'files',label:'文件'}]
-const view = ref('term')
+// 视图状态在 core/useNav（全局），供页面内跳转（如 C4 结果目录导航）复用
+const view = useNavView
 
 // 审批入口：切视图的同时拉取待审任务
 function openApprove() { view.value = 'approve'; loadTasks() }

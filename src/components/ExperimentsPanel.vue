@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { gwFetch } from '../adapters/useGateway'
 import { notify } from '../shared/feedback'
+import { loadFiles } from '../core/useFileTree'
+import { navigateTo } from '../core/useNav'
 import { useRequestGuard } from '../core/useRequestGuard'
 import StateShell from './StateShell.vue'
 
@@ -46,6 +48,13 @@ async function copyText(text: string, label: string) {
   catch { notify('复制失败：剪贴板不可用') }
 }
 
+/** C4 跳转：结果目录在远端靶机 —— 文件树导航过去并切到工作区视图。 */
+function openResultDir(dir: string) {
+  if (!dir) return
+  loadFiles(dir)
+  navigateTo('term')
+}
+
 function fmtTime(ms: number): string {
   if (!ms) return '-'
   return new Date(ms).toLocaleString('zh-CN', { hour12: false })
@@ -77,6 +86,7 @@ onMounted(load)
           <span class="exp-k">结果目录</span>
           <code class="mono">{{ s.result_dir || '-' }}</code>
           <button type="button" v-if="s.result_dir" class="mini-btn" @click="copyText(s.result_dir, '结果目录')">复制</button>
+          <button type="button" v-if="s.result_dir" class="mini-btn" @click="openResultDir(s.result_dir)">在文件树打开</button>
         </div>
       </div>
     </StateShell>

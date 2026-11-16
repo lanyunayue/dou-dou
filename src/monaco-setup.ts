@@ -45,8 +45,10 @@
  *   规则映射到 .d.ts，导致 rolldown 报 MISSING_EXPORT）。
  *
  * 语言 worker 说明：
- *   本项目编辑器只用 language="plaintext"（纯文本），
- *   不需要 json/ts/css/html 等语言 worker。
+ *   S3-3 起编辑器按扩展名启用六类语法高亮：py/yaml/md 用内建 Monarch
+ *   贡献（纯内存态高亮，不需要语言 worker）；json/log/conf 用下方自定义
+ *   Monarch tokenizer（Monaco 无内建 log，json 引官方 language service
+ *   需要 json.worker，体积代价不值）。仍只需 editor.worker 一个 worker。
  */
 import {
   CancellationTokenSource,
@@ -64,8 +66,13 @@ import {
   editor,
   languages,
 } from '../node_modules/monaco-editor/esm/vs/editor/editor.api.js';
+// S3-3：按需接入内建语言贡献（Monarch 高亮无需语言 worker）。
+import '../node_modules/monaco-editor/esm/vs/languages/definitions/python/register.js';
+import '../node_modules/monaco-editor/esm/vs/languages/definitions/yaml/register.js';
+import '../node_modules/monaco-editor/esm/vs/languages/definitions/markdown/register.js';
 import EditorWorker from '../node_modules/monaco-editor/esm/vs/editor/editor.worker.js?worker';
 import loader from '@monaco-editor/loader';
+import { douTokens } from './shared/tokens';
 
 // 组装成标准的 monaco 实例对象（对齐 AMD 模式下 window.monaco 的形态）。
 const monaco = {
@@ -94,5 +101,110 @@ const monaco = {
 
 // 注入本地实例，loader 不会再尝试访问 CDN。
 loader.config({ monaco });
+
+// ---------- S3-3：dou-terminal 主题 + 六类语法高亮 ----------
+// 主题色值与 src/styles/app.css 的 --dou-* token 同源（douTokens）。
+
+editor.defineTheme('dou-terminal', {
+  base: 'vs-dark',
+  inherit: true,
+  rules: [
+    { token: 'comment', foreground: douTokens.color.dim.slice(1), fontStyle: 'italic' },
+    { token: 'keyword', foreground: douTokens.color.accent.slice(1) },
+    { token: 'keyword.flow', foreground: douTokens.color.accent.slice(1) },
+    { token: 'string', foreground: douTokens.color.warn.slice(1) },
+    { token: 'string.escape', foreground: douTokens.color.accentStrong.slice(1) },
+    { token: 'number', foreground: douTokens.color.info.slice(1) },
+    { token: 'type', foreground: douTokens.color.ok.slice(1) },
+    { token: 'type.identifier', foreground: douTokens.color.ok.slice(1) },
+    { token: 'function', foreground: douTokens.color.accentStrong.slice(1) },
+    { token: 'identifier', foreground: douTokens.color.text.slice(1) },
+    { token: 'delimiter', foreground: douTokens.color.dim.slice(1) },
+    { token: 'operator', foreground: douTokens.color.accent.slice(1) },
+    // dou-json（自定义 tokenizer）
+    { token: 'dou.json.key', foreground: douTokens.color.accent.slice(1) },
+    { token: 'dou.json.string', foreground: douTokens.color.warn.slice(1) },
+    { token: 'dou.json.keyword', foreground: douTokens.color.dangerText.slice(1) },
+    { token: 'dou.json.number', foreground: douTokens.color.info.slice(1) },
+    // dou-log（自定义 tokenizer）
+    { token: 'dou.log.time', foreground: douTokens.color.dim.slice(1) },
+    { token: 'dou.log.error', foreground: douTokens.color.dangerText.slice(1), fontStyle: 'bold' },
+    { token: 'dou.log.warn', foreground: douTokens.color.warnText.slice(1) },
+    { token: 'dou.log.info', foreground: douTokens.color.text.slice(1) },
+    { token: 'dou.log.debug', foreground: douTokens.color.dim.slice(1) },
+    { token: 'dou.log.num', foreground: douTokens.color.info.slice(1) },
+    { token: 'dou.log.path', foreground: douTokens.color.accentStrong.slice(1) },
+    // dou-conf（自定义 tokenizer）
+    { token: 'dou.conf.comment', foreground: douTokens.color.dim.slice(1), fontStyle: 'italic' },
+    { token: 'dou.conf.key', foreground: douTokens.color.accent.slice(1) },
+    { token: 'dou.conf.string', foreground: douTokens.color.warn.slice(1) },
+    { token: 'dou.conf.num', foreground: douTokens.color.info.slice(1) },
+    { token: 'dou.conf.keyword', foreground: douTokens.color.accent.slice(1) },
+  ],
+  colors: {
+    'editor.background': douTokens.color.bg,
+    'editor.foreground': douTokens.color.text,
+    'editorLineNumber.foreground': douTokens.color.borderStrong,
+    'editorLineNumber.activeForeground': douTokens.color.dim,
+    'editor.selectionBackground': '#' + '223029',
+    'editor.lineHighlightBackground': douTokens.color.panel,
+    'editorCursor.foreground': douTokens.color.accent,
+    'editorIndentGuide.background1': '#' + '1a2420',
+    'editorIndentGuide.activeBackground1': '#' + '223029',
+  },
+});
+
+// json / log / conf 自定义 Monarch tokenizer（无语言依赖，零 worker）。
+// 显式类型注解：Monarch 规则是二元/三元元组，裸字面量会被推断为数组而非元组。
+const douJsonLang: languages.IMonarchLanguage = {
+  ignoreCase: false,
+  tokenizer: {
+    root: [
+      [/"(?:[^"\\]|\\.)*"(?=\s*:)/, 'dou.json.key'],
+      [/"(?:[^"\\]|\\.)*"/, 'dou.json.string'],
+      [/\b(?:true|false|null)\b/, 'dou.json.keyword'],
+      [/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/, 'dou.json.number'],
+      [/[{}[\]]/, 'delimiter'],
+      [/:,]/, 'delimiter'],
+    ],
+  },
+};
+
+const douLogLang: languages.IMonarchLanguage = {
+  ignoreCase: true,
+  tokenizer: {
+    root: [
+      [/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/, 'dou.log.time'],
+      [/\[?(?:ERROR|FATAL|CRITICAL)\]?/, 'dou.log.error'],
+      [/\[?(?:WARN|WARNING)\]?/, 'dou.log.warn'],
+      [/\[?(?:INFO|NOTICE)\]?/, 'dou.log.info'],
+      [/\[?(?:DEBUG|TRACE)\]?/, 'dou.log.debug'],
+      [/(?:\/[\w.@\-]+)+/, 'dou.log.path'],
+      [/\b\d+(?:\.\d+)?\b/, 'dou.log.num'],
+    ],
+  },
+};
+
+const douConfLang: languages.IMonarchLanguage = {
+  ignoreCase: false,
+  tokenizer: {
+    root: [
+      [/#.*$/, 'dou.conf.comment'],
+      [/;.*$/, 'dou.conf.comment'],
+      [/"(?:[^"\\]|\\.)*"/, 'dou.conf.string'],
+      [/'(?:[^'\\]|\\.)*'/, 'dou.conf.string'],
+      [/\b(?:yes|no|true|false|on|off|true|false)\b/, 'dou.conf.keyword'],
+      [/^\s*[\w.@\-]+(?=[\s=])/, 'dou.conf.key'],
+      [/\b\d+(?:\.\d+)?\b/, 'dou.conf.num'],
+    ],
+  },
+};
+
+languages.register({ id: 'dou-json' });
+languages.setMonarchTokensProvider('dou-json', douJsonLang);
+languages.register({ id: 'dou-log' });
+languages.setMonarchTokensProvider('dou-log', douLogLang);
+languages.register({ id: 'dou-conf' });
+languages.setMonarchTokensProvider('dou-conf', douConfLang);
 
 export { monaco };
