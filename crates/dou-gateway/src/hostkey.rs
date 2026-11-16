@@ -85,7 +85,11 @@ impl KnownHosts {
 
     /// 已记录的主机条目（按地址排序，仅用于展示；密钥给短摘要）。
     pub fn entries(&self) -> Vec<(String, String)> {
-        let mut v: Vec<(String, String)> = self.map.iter().map(|(k, s)| (k.clone(), s.clone())).collect();
+        let mut v: Vec<(String, String)> = self
+            .map
+            .iter()
+            .map(|(k, s)| (k.clone(), s.clone()))
+            .collect();
         v.sort_by(|a, b| a.0.cmp(&b.0));
         v
     }
