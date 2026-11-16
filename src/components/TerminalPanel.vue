@@ -1,16 +1,23 @@
 <template>
   <div class="panel panel-term">
+    <!-- R6 工具条降噪：+ 主按钮 / 本地 Shell 次按钮 / 检索 ≥5 会话才出现 / 广播勾选 ≥1 才出现 / 导出进溢出菜单 -->
     <div class="tabbar">
-      <input v-model="sessionFilter" class="filter tabfilter" placeholder="检索会话" />
       <div v-for="t in visibleTabs" :key="t.sid" class="tab" :class="{active: t.sid===activeSid}" @click="switchTab(t.sid)">
         <input type="checkbox" class="tabcheck" v-model="t.selected" @click.stop />
         {{t.title}}<span v-if="t.badge" class="badge">{{t.badge}}</span>
         <span class="close" @click.stop="closeTab(t.sid)">×</span>
       </div>
-      <button class="tabadd" @click="toggleConnectForm" title="新建连接">+</button>
-      <button class="mini-btn" @click="openLocalTab" title="本地 PowerShell（无需远程主机）">本地 Shell</button>
-      <button class="mini-btn" @click="exportTerm">导出</button>
-      <input v-model="broadcast" class="broadcast" placeholder="广播到勾选→" @keyup.enter="doBroadcast" />
+      <button class="tabadd primary" @click="toggleConnectForm" title="新建连接：主机 + 认证方式一气呵成">＋</button>
+      <button class="mini-btn" @click="openLocalTab" title="本地 PowerShell，无需远程主机">本地 Shell</button>
+      <input v-if="showSessionFilter" v-model="sessionFilter" class="filter tabfilter" placeholder="检索会话" />
+      <input v-if="selectedCount" v-model="broadcast" class="broadcast" placeholder="同时输入到所选会话（回车发送）" @keyup.enter="doBroadcast" />
+      <div v-if="tabs.length" class="overflow">
+        <button class="mini-btn" title="更多操作" :aria-expanded="menuOpen" @click.stop="menuOpen=!menuOpen">⋯</button>
+        <div v-if="menuOpen" class="overflow-menu">
+          <button type="button" @click="exportTerm(); menuOpen=false">导出当前会话记录</button>
+        </div>
+        <div v-if="menuOpen" class="overflow-mask" @click="menuOpen=false"></div>
+      </div>
     </div>
     <!-- 主机监控条（学 MobaXterm 的服务器监控）：host_stats 事件驱动，会话断开自动隐藏 -->
     <div v-if="hostStats" class="hostbar" role="status" aria-label="主机监控">
@@ -36,16 +43,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import OfflineState from './OfflineState.vue'
 import ConnectForm from './ConnectForm.vue'
 import {
   termEl, activeSid, sessionFilter, broadcast, visibleTabs, connectFormVisible as formVisible,
   toggleConnectForm, openLocalTab, switchTab, closeTab, exportTerm, doBroadcast,
+  selectedCount, showSessionFilter, tabs,
 } from '../core/useTerminal'
 import { sshError } from '../core/useSsh'
 import { hostStats } from '../core/useMonitor'
 import 'xterm/css/xterm.css'
+
+// R6 溢出菜单开关（点按钮切换，点遮罩关闭）
+const menuOpen = ref(false)
 
 // 终端 DOM 挂载点：xterm 需要真实节点才能 open()，这里把节点交给终端 composable
 function setTermEl(el: unknown) {

@@ -288,6 +288,45 @@ html, body {
 .tab.active { background: var(--dou-accent); color: var(--dou-bg); border-color: var(--dou-accent); font-weight: 700; }
 .tabadd { border: none; background: transparent; color: var(--dou-dim); cursor: pointer; font-size: var(--dou-fs-lg); min-height: 28px; min-width: 28px; }
 .tabadd:hover { color: var(--dou-accent); }
+/* R6：「+」主按钮化——新建连接是终端面板的第一动作 */
+.tabadd.primary {
+  background: var(--dou-accent);
+  color: var(--dou-bg);
+  font-weight: 700;
+  border-radius: var(--dou-radius-sm);
+  padding: 0 10px;
+}
+.tabadd.primary:hover { background: var(--dou-accent-strong); color: var(--dou-bg); }
+/* R6：溢出菜单（⋯）——低频动作收纳，遮罩点击关闭 */
+.overflow { position: relative; margin-left: auto; }
+.overflow-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 170px;
+  background: var(--dou-panel);
+  border: 1px solid var(--dou-border-strong);
+  border-radius: var(--dou-radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+.overflow-menu button {
+  border: none;
+  background: none;
+  color: var(--dou-text);
+  font: inherit;
+  font-size: var(--dou-fs-xs);
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-radius: var(--dou-radius-sm);
+  white-space: nowrap;
+}
+.overflow-menu button:hover { background: var(--dou-panel-alt); color: var(--dou-accent-strong); }
+.overflow-mask { position: fixed; inset: 0; z-index: 25; }
 .broadcast {
   flex: 1;
   min-width: 120px;

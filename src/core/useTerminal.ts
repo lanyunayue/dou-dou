@@ -26,6 +26,10 @@ export const visibleTabs = computed(() => tabs.value.filter(t =>
   !sessionFilter.value || t.title.toLowerCase().includes(sessionFilter.value.toLowerCase())
 ))
 
+// R6 降噪派生：检索框仅在会话 ≥5 时出现；广播框仅在勾选 ≥1 时出现（单会话时是纯噪声）
+export const selectedCount = computed(() => tabs.value.filter(t => t.selected).length)
+export const showSessionFilter = computed(() => tabs.value.length >= 5)
+
 // 每会话独立的 xterm 实例（fit 插件随标签保存，切换显示时按容器重排）
 function createTerm(): { term: Terminal; fit: FitAddon } {
   const term = new Terminal({ fontSize: 13, convertEol: true })
