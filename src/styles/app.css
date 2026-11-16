@@ -148,7 +148,17 @@ html, body {
 .conn-hint { font-size: var(--dou-fs-xs); color: var(--dou-dim); margin: 0 0 12px; line-height: 1.6; }
 
 /* ---------- 导航 ---------- */
-.nav { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
+.nav { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.nav-group {
+  margin: 14px 0 4px;
+  padding: 0 12px;
+  font-size: var(--dou-fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--dou-dim);
+  text-transform: uppercase;
+}
+.nav-group::before { content: ":: "; color: var(--dou-accent); }
 .nav-item {
   display: flex;
   align-items: center;

@@ -9,15 +9,20 @@
       <div class="conn-hint">{{ connSummary }}</div>
       <button class="btn" @click="refresh">刷新</button>
       <nav class="nav" aria-label="主导航">
+        <div class="nav-group">工作区</div>
         <button v-for="n in navs" :key="n.key" type="button" class="nav-item" :class="{active: view===n.key}" :aria-current="view===n.key ? 'page' : undefined" @click="view=n.key">{{n.label}}</button>
+        <div class="nav-group">管理</div>
+        <button type="button" class="nav-item" :class="{active: view==='connections'}" :aria-current="view==='connections' ? 'page' : undefined" @click="view='connections'">🔗 连接管理</button>
+        <button type="button" class="nav-item" :class="{active: view==='policy'}" :aria-current="view==='policy' ? 'page' : undefined" @click="view='policy'">📜 策略配置</button>
+        <button type="button" class="nav-item" :class="{active: view==='audit'}" :aria-current="view==='audit' ? 'page' : undefined" @click="view='audit'">🧾 审计中心</button>
+        <button type="button" class="nav-item" :class="{active: view==='experiments'}" :aria-current="view==='experiments' ? 'page' : undefined" @click="view='experiments'">🧪 实验详情</button>
+        <button type="button" class="nav-item" :class="{active: view==='settings'}" :aria-current="view==='settings' ? 'page' : undefined" @click="view='settings'">⚙ 设置</button>
+        <div class="nav-group">凭据与安全</div>
         <button type="button" class="nav-item" :class="{active: view==='onboard'}" :aria-current="view==='onboard' ? 'page' : undefined" @click="view='onboard'">🔌 接入向导</button>
         <button type="button" class="nav-item" :class="{active: view==='approve'}" :aria-current="view==='approve' ? 'page' : undefined" @click="openApprove">✅ 审批<span v-if="pendingCount" class="badge">{{pendingCount}}</span></button>
         <button type="button" class="nav-item" :class="{active: view==='scope'}" :aria-current="view==='scope' ? 'page' : undefined" @click="view='scope'; loadTokens()">🔑 凭据与作用域</button>
         <button type="button" class="nav-item" :class="{active: view==='transfer'}" :aria-current="view==='transfer' ? 'page' : undefined" @click="view='transfer'; loadTq()">📤 传输队列</button>
-        <button type="button" class="nav-item" :class="{active: view==='vault'}" :aria-current="view==='vault' ? 'page' : undefined" @click="view='vault'; vaultList()">🔐 凭据保险库</button>
         <button type="button" class="nav-item" :class="{active: view==='hostkeys'}" :aria-current="view==='hostkeys' ? 'page' : undefined" @click="view='hostkeys'; loadHostKeys(); loadGatewayHostKeys()">🛡 主机密钥</button>
-        <button type="button" class="nav-item" @click="importMoba">📥 导入 MobaXterm</button>
-        <button type="button" class="nav-item" @click="snapshot">📸 快照</button>
       </nav>
     </aside>
     <div class="workspace">
@@ -46,42 +51,15 @@
       <!-- 传输队列 -->
       <TransferQueuePanel v-if="view==='transfer'" />
 
-      <!-- 凭据保险库 -->
-      <div v-if="view==='vault'" class="panel panel-page">
-        <div class="panelhead">🔐 凭据保险库（主密码加密存储连接档案 + 私钥）</div>
-        <div v-if="!vaultUnlocked" class="row">
-          <input v-model="masterPw" type="password" class="filter" placeholder="主密码" />
-          <button class="btn" @click="vaultInit">初始化</button>
-          <button class="btn ok" @click="vaultUnlock">解锁</button>
-          <span class="hint">首次需初始化；之后用主密码解锁。锁定时清除内存密钥；私钥明文不落盘，用后即清。</span>
-        </div>
-        <div v-else class="row">
-          <span class="hint ok-text">已解锁</span>
-          <button class="btn bad" @click="vaultLock">锁定</button>
-        </div>
-        <div v-if="vaultUnlocked" class="wizard">
-          <div class="row">
-            <input v-model="newName" class="filter" placeholder="名称" />
-            <input v-model="newHost" class="filter" placeholder="host" />
-            <input v-model="newPort" class="filter" placeholder="port" style="width:60px" />
-            <input v-model="newUser" class="filter" placeholder="user" />
-            <input v-model="newKey" class="filter" placeholder="私钥路径" />
-            <button class="btn ok" @click="vaultAdd">加密入库</button>
-          </div>
-          <div v-if="!vaultTargets.length" class="empty">暂无目标</div>
-          <div v-for="t in vaultTargets" :key="t.name" class="approve-card">
-            <div class="mono">{{ t.name }} · {{ t.user }}@{{ t.host }}:{{ t.port }} {{ t.enc_key? '🔑 已加密':'—' }}</div>
-            <div class="approve-actions">
-              <button class="btn ok" v-if="t.enc_key" @click="vaultGetKey(t.name)">校验密钥</button>
-              <button class="btn" v-if="t.enc_key" @click="vaultTestConnect(t.name)">用密钥连接</button>
-              <button class="btn bad" @click="vaultRemove(t.name)">删除</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- 主机密钥 -->
       <HostKeyPanel v-if="view==='hostkeys'" />
+
+      <!-- S3-1 五页面 -->
+      <ConnectionsPanel v-if="view==='connections'" class="panel-page" />
+      <PolicyPanel v-if="view==='policy'" class="panel-page" />
+      <AuditPanel v-if="view==='audit'" class="panel-page" />
+      <ExperimentsPanel v-if="view==='experiments'" class="panel-page" />
+      <SettingsPanel v-if="view==='settings'" class="panel-page" />
 
       </ErrorBoundary>
 
@@ -91,8 +69,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 
 import ErrorBanner from '../components/ErrorBanner.vue'
 import ErrorBoundary from '../components/ErrorBoundary.vue'
@@ -104,6 +81,11 @@ import ApprovalPanel from '../components/ApprovalPanel.vue'
 import CredentialScopePanel from '../components/CredentialScopePanel.vue'
 import TransferQueuePanel from '../components/TransferQueuePanel.vue'
 import HostKeyPanel from '../components/HostKeyPanel.vue'
+import ConnectionsPanel from '../components/ConnectionsPanel.vue'
+import PolicyPanel from '../components/PolicyPanel.vue'
+import AuditPanel from '../components/AuditPanel.vue'
+import ExperimentsPanel from '../components/ExperimentsPanel.vue'
+import SettingsPanel from '../components/SettingsPanel.vue'
 
 import { status, connSummary, refresh } from '../adapters/useGateway'
 import { pendingCount, loadTasks, startApprovalPolling } from '../core/useApproval'
@@ -115,9 +97,6 @@ import { newTab, registerTerminalListener, registerWindowFocusListener } from '.
 import { registerTqListener } from '../core/useTransferQueue'
 import { registerHostKeyListener } from '../core/useHostKeys'
 import { loadFiles } from '../core/useFileTree'
-import { snapshot, importMoba } from '../commands/useShell'
-import { SSH_KEY } from '../core/useSsh'
-import { notify } from '../shared/feedback'
 
 const navs = [{key:'term',label:'终端'},{key:'files',label:'文件'}]
 const view = ref('term')
@@ -125,30 +104,9 @@ const view = ref('term')
 // 审批入口：切视图的同时拉取待审任务
 function openApprove() { view.value = 'approve'; loadTasks() }
 
-// ---------- 凭据保险库 ----------
-/** 保险库中某个目标私钥的**非敏感**信息（私钥明文不出后端、不落盘）。 */
-interface VaultKeyInfo {
-  algorithm: string
-  fingerprint: string
-}
-const vaultUnlocked = ref(false)
-const vaultTargets = ref<any[]>([])
-const masterPw = ref('')
-const newName = ref(''); const newHost = ref(''); const newPort = ref(22); const newUser = ref('dou'); const newKey = ref(SSH_KEY)
-async function vaultInit() { try { await invoke('vault_init', { master: masterPw.value }); vaultUnlocked.value = true; await vaultList(); notify('保险库已初始化并解锁') } catch (e: any) { notify('初始化失败: ' + e) } }
-async function vaultUnlock() { try { await invoke('vault_unlock', { master: masterPw.value }); vaultUnlocked.value = true; await vaultList() } catch (e: any) { notify('解锁失败: ' + e) } }
-function vaultLock() { invoke('vault_lock'); vaultUnlocked.value = false; vaultTargets.value = [] }
-async function vaultList() { try { vaultTargets.value = await invoke('vault_list_targets') } catch { vaultTargets.value = [] } }
-async function vaultAdd() {
-  try { await invoke('vault_add_target', { name: newName.value, host: newHost.value, port: Number(newPort.value), user: newUser.value, keyPath: newKey.value }); await vaultList(); notify('已加密入库') }
-  catch (e: any) { notify('入库失败: ' + e) }
-}
-async function vaultGetKey(name: string) { try { const info = await invoke<VaultKeyInfo>('vault_get_key', { name }); notify('私钥已在内存中解密校验：\n算法 ' + info.algorithm + '\n指纹 ' + info.fingerprint + '\n（明文未落盘，用完即清）') } catch (e: any) { notify('取出失败: ' + e) } }
-async function vaultTestConnect(name: string) { try { const msg = await invoke<string>('vault_test_connect', { name }); notify(msg) } catch (e: any) { notify('连接失败: ' + e) } }
-async function vaultRemove(name: string) { try { await invoke('vault_remove_target', { name }); await vaultList() } catch (e: any) { notify('删除失败: ' + e) } }
-
 // ---------- 启动编排 ----------
 // 事件订阅在应用级注册（应用生命周期内常驻），避免跨视图切换丢事件；卸载时统一解绑。
+// vault_status 由 ConnectionsPanel 自行订阅（页面级状态，随页面生命周期）。
 const unlisteners: UnlistenFn[] = []
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -158,7 +116,6 @@ onMounted(async () => {
   unlisteners.push(await registerTerminalListener())
   unlisteners.push(await registerHostKeyListener())
   unlisteners.push(await registerTqListener())
-  unlisteners.push(await listen('vault_status', (e: any) => { vaultUnlocked.value = e.payload; if (e.payload) vaultList() }))
 
   await newTab()
   loadFiles('/home/dou')
