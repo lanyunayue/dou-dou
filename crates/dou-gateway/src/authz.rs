@@ -37,6 +37,14 @@ pub const M_ONLY_PATHS: &[&str] = &[
     "/task/cancel",
     // B2：遗忘主机密钥属信任决策，只允许主令牌（设备所有者）执行。
     "/hostkey/forget",
+    // B1：私钥库全端点 M-only（解锁/锁定/状态/列表/导入/删除）。
+    // 刻意没有「读取明文私钥」端点 —— 见 vault.rs 模块注释。
+    "/vault/status",
+    "/vault/unlock",
+    "/vault/lock",
+    "/vault/keys",
+    "/vault/keys/import",
+    "/vault/keys/revoke",
 ];
 
 #[derive(Debug, Clone)]
@@ -214,6 +222,12 @@ mod tests {
             "/console",
             "/scope/tokens",
             "/scope/revoke",
+            "/vault/status",
+            "/vault/unlock",
+            "/vault/lock",
+            "/vault/keys",
+            "/vault/keys/import",
+            "/vault/keys/revoke",
         ] {
             assert!(M_ONLY_PATHS.contains(&p), "{p} 必须 M-only");
         }

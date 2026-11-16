@@ -21,6 +21,7 @@ mod store;
 mod tasks;
 mod throttle;
 mod tools;
+mod vault;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -52,6 +53,8 @@ pub struct AppState {
     pub leases: Arc<tokio::sync::Mutex<HashMap<String, u64>>>,
     /// 主机密钥信任库（TOFU）：与 ssh::connect_* 共享同一份（B2）。
     pub known: Arc<std::sync::Mutex<hostkey::KnownHosts>>,
+    /// B1 私钥库：解锁口令派生的 KEK。None = 未解锁（重启即锁，需重新输入口令）。
+    pub vault: Arc<std::sync::Mutex<Option<[u8; 32]>>>,
 }
 
 #[tokio::main]
@@ -67,6 +70,9 @@ async fn main() {
     }
     if let Err(e) = state::init_state_schema() {
         eprintln!("[state] 状态表初始化失败: {e}");
+    }
+    if let Err(e) = vault::init_tables() {
+        eprintln!("[vault] 私钥库元数据表初始化失败: {e}");
     }
     // 默认关闭 dev：不显式设置 DOU_DEV_MODE=1 时，禁止本机命令兜底执行。
     let dev = std::env::var("DOU_DEV_MODE")
@@ -186,6 +192,7 @@ async fn main() {
         quota: Arc::new(tokio::sync::Mutex::new(quota_map)),
         leases: Arc::new(tokio::sync::Mutex::new(lease_map)),
         known: known.clone(),
+        vault: Arc::new(std::sync::Mutex::new(None)),
     };
 
     let app = Router::new()
@@ -206,6 +213,12 @@ async fn main() {
         .route("/onboard/write", axum::routing::post(onboard_write))
         .route("/hostkey/list", get(hostkey_list))
         .route("/hostkey/forget", axum::routing::post(hostkey_forget))
+        .route("/vault/status", get(vault_status))
+        .route("/vault/unlock", axum::routing::post(vault_unlock))
+        .route("/vault/lock", axum::routing::post(vault_lock))
+        .route("/vault/keys", get(vault_keys_list))
+        .route("/vault/keys/import", axum::routing::post(vault_keys_import))
+        .route("/vault/keys/revoke", axum::routing::post(vault_keys_revoke))
         .route("/console", get(console_page))
         .with_state(state.clone())
         // W-15：单层中间件统一收口全部路由；唯一 Bearer 解析点在 authz.rs。
@@ -494,6 +507,166 @@ async fn hostkey_forget(State(st): State<AppState>, body: String) -> Response {
         ),
     );
     json_ok(&json!({ "ok": removed, "addr": addr }))
+}
+
+// ---------- B1 私钥本地加密库 ----------
+
+/// 解锁：口令派生 KEK 驻留内存。body: { "passphrase": "..." }
+/// 错误信息不含口令；审计只记事件与成败，不记口令。
+async fn vault_unlock(State(st): State<AppState>, body: String) -> Response {
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let pass = v
+        .get("passphrase")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    match vault::unlock(&pass) {
+        Ok(kek) => {
+            *st.vault.lock().unwrap_or_else(|e| e.into_inner()) = Some(kek);
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "human",
+                    "vault_unlock",
+                    "/vault/unlock",
+                    "allowed",
+                    json!({}),
+                ),
+            );
+            json_ok(&json!({ "ok": true, "unlocked": true }))
+        }
+        Err(e) => {
+            audit::write(
+                &st.audit,
+                audit::event(
+                    "human",
+                    "vault_unlock",
+                    "/vault/unlock",
+                    "denied",
+                    json!({ "reason": e }),
+                ),
+            );
+            json_err(StatusCode::UNAUTHORIZED, &e)
+        }
+    }
+}
+
+/// 锁定：从内存丢弃 KEK。body 无需内容。
+async fn vault_lock(State(st): State<AppState>) -> Response {
+    *st.vault.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    audit::write(
+        &st.audit,
+        audit::event("human", "vault_lock", "/vault/lock", "allowed", json!({})),
+    );
+    json_ok(&json!({ "ok": true, "unlocked": false }))
+}
+
+/// 状态与计数：不含任何密钥材料。
+async fn vault_status(State(st): State<AppState>) -> Response {
+    let unlocked = st.vault.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+    let key_count = match crate::store::open() {
+        Ok(conn) => vault::list_keys(&conn).map(|v| v.len()).unwrap_or(0),
+        Err(_) => 0,
+    };
+    json_ok(&json!({ "unlocked": unlocked, "key_count": key_count }))
+}
+
+/// 私钥记录列表：id / label / host_id / created_at，无 ciphertext / salt。
+async fn vault_keys_list(State(st): State<AppState>) -> Response {
+    match crate::store::open() {
+        Ok(conn) => match vault::list_keys(&conn) {
+            Ok(items) => json_ok(&json!({ "count": items.len(), "items": items })),
+            Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        },
+        Err(e) => json_err(StatusCode::SERVICE_UNAVAILABLE, &e),
+    }
+}
+
+/// 导入私钥：加密落库。body: { "pem": "...", "label": "...", "host_id": null }
+/// 必须已解锁；明文 pem 不进日志、不进审计、不回显。
+async fn vault_keys_import(State(st): State<AppState>, body: String) -> Response {
+    let kek_guard = st.vault.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(kek) = kek_guard.as_ref() else {
+        return json_err(StatusCode::LOCKED, "私钥库未解锁：先调用 /vault/unlock");
+    };
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let pem = v
+        .get("pem")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let label = v
+        .get("label")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let host_id = v
+        .get("host_id")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    match crate::store::open() {
+        Ok(conn) => match vault::import_key(&conn, kek, host_id.as_deref(), &label, &pem) {
+            Ok(id) => {
+                audit::write(
+                    &st.audit,
+                    audit::event(
+                        "human",
+                        "vault_key_import",
+                        &id,
+                        "allowed",
+                        json!({ "label": label }),
+                    ),
+                );
+                json_ok(&json!({ "ok": true, "id": id }))
+            }
+            Err(e) => {
+                audit::write(
+                    &st.audit,
+                    audit::event(
+                        "human",
+                        "vault_key_import",
+                        "-",
+                        "denied",
+                        json!({ "reason": e }),
+                    ),
+                );
+                json_err(StatusCode::BAD_REQUEST, &e)
+            }
+        },
+        Err(e) => json_err(StatusCode::SERVICE_UNAVAILABLE, &e),
+    }
+}
+
+/// 删除私钥记录（硬删）。body: { "id": "key_..." }
+async fn vault_keys_revoke(State(st): State<AppState>, body: String) -> Response {
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let id = v
+        .get("id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    if id.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "缺少 id");
+    }
+    match crate::store::open() {
+        Ok(conn) => match vault::delete_key(&conn, &id) {
+            Ok(removed) => {
+                audit::write(
+                    &st.audit,
+                    audit::event(
+                        "human",
+                        "vault_key_delete",
+                        &id,
+                        if removed { "allowed" } else { "no_record" },
+                        json!({ "removed": removed }),
+                    ),
+                );
+                json_ok(&json!({ "ok": removed, "id": id }))
+            }
+            Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        },
+        Err(e) => json_err(StatusCode::SERVICE_UNAVAILABLE, &e),
+    }
 }
 
 // ---------- A1 会话锁：人工占用 / 释放 ----------

@@ -104,6 +104,7 @@ pub fn init_schema() -> Result<(), String> {
         ("client_id", "TEXT"),
         ("expires_at", "INTEGER"),
         ("revoked_at", "INTEGER"),
+        ("label", "TEXT"), // B1：私钥记录的展示名（非敏感）
     ];
     for (col, ty) in alter {
         if !cols.iter().any(|c| c == col) {

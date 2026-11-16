@@ -193,7 +193,30 @@ pub async fn connect_key(
 ) -> Result<SshConnection, String> {
     let key = load_secret_key(Path::new(key_path), None)
         .map_err(|e| format!("load private key failed {key_path}: {e}"))?;
+    finish_key_connect(host, port, user, key, known).await
+}
 
+/// B1：从内存 PEM 建连（私钥由 vault 解密后传入，不经文件系统，不落盘）。
+pub async fn connect_key_material(
+    host: &str,
+    port: u16,
+    user: &str,
+    key_pem: &str,
+    known: Arc<Mutex<KnownHosts>>,
+) -> Result<SshConnection, String> {
+    let key = russh::keys::decode_secret_key(key_pem, None)
+        .map_err(|e| format!("load private key failed (vault): {e}"))?;
+    finish_key_connect(host, port, user, key, known).await
+}
+
+/// 密钥建连的公共尾段：建通道、取主机密钥、公钥认证。
+async fn finish_key_connect(
+    host: &str,
+    port: u16,
+    user: &str,
+    key: russh::keys::PrivateKey,
+    known: Arc<Mutex<KnownHosts>>,
+) -> Result<SshConnection, String> {
     let (mut handle, state) = open(host, port, known).await?;
     let (host_key, first_seen) = take_host_key(&state)?;
 
