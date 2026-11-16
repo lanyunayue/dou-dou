@@ -79,8 +79,19 @@ async fn monitor_loop(app: AppHandle) {
                 let _ = app.emit("host_stats", serde_json::json!(s));
             }
             Err(_) => {
-                // exec 失败 = 会话已断：停表并通知前端清空监控条。
-                let _ = app.emit("host_stats_off", ());
+                // R7：失败先区分「主机不支持」与「会话断开」——非 Linux（无 /proc）给
+                // 边界说明而非静默隐藏；探测失败/远端就是 Linux 则按会话断开处理。
+                match probe_os(&h).await {
+                    Some(os) if !os.contains("Linux") => {
+                        let _ = app.emit(
+                            "host_stats_unsupported",
+                            serde_json::json!({ "os": os.chars().take(60).collect::<String>() }),
+                        );
+                    }
+                    _ => {
+                        let _ = app.emit("host_stats_off", ());
+                    }
+                }
                 mon().lock().unwrap_or_else(|e| e.into_inner()).take();
                 break;
             }
@@ -88,6 +99,31 @@ async fn monitor_loop(app: AppHandle) {
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
     RUNNING.store(false, Ordering::SeqCst);
+}
+
+/// R7：远端系统探测（exec `uname -s`），用于区分「非 Linux 主机」与「会话断开」。
+/// Windows 主机普遍无 uname，shell 的报错信息会出现在 stderr（ExtendedData）里，
+/// 同样视为「非 Linux」。探测失败（channel 断开等）返回 None，按会话断开处理。
+async fn probe_os(h: &DouHandle) -> Option<String> {
+    let mut ch = h.channel_open_session().await.ok()?;
+    ch.exec(true, "uname -s").await.ok()?;
+
+    let mut out = String::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let msg = tokio::time::timeout_at(deadline.into(), ch.wait())
+            .await
+            .ok()?;
+        match msg {
+            Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
+                out.push_str(&String::from_utf8_lossy(&data));
+            }
+            Some(ChannelMsg::Eof) | Some(ChannelMsg::ExitStatus { .. }) | None => break,
+            _ => {}
+        }
+    }
+    let s = out.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
 }
 
 async fn collect(h: &DouHandle) -> Result<(HostStats, u64, u64), String> {

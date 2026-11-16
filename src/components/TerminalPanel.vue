@@ -19,7 +19,7 @@
         <div v-if="menuOpen" class="overflow-mask" @click="menuOpen=false"></div>
       </div>
     </div>
-    <!-- 主机监控条（学 MobaXterm 的服务器监控）：host_stats 事件驱动，会话断开自动隐藏 -->
+    <!-- R7：监控条（Linux 主机）或边界说明（非 Linux 主机），不再静默隐藏 -->
     <div v-if="hostStats" class="hostbar" role="status" aria-label="主机监控">
       <span class="hb-item">
         CPU {{ Math.round(hostStats.cpu_pct) }}%
@@ -31,6 +31,10 @@
       </span>
       <span class="hb-item">↓ {{ fmtKbps(hostStats.rx_kbps) }} · ↑ {{ fmtKbps(hostStats.tx_kbps) }}</span>
       <span class="hb-item hb-dim">已运行 {{ fmtUptime(hostStats.uptime_s) }}</span>
+    </div>
+    <!-- R7：非 Linux 主机的边界说明行（探测结果驱动，单次提示） -->
+    <div v-else-if="monitorUnsupported" class="hostbar hostbar-note" role="status" aria-label="监控边界说明">
+      ⓘ {{ monitorUnsupported }}
     </div>
     <div class="term-wrap">
       <div :ref="setTermEl" class="terminal" :style="{ visibility: formVisible ? 'hidden' : 'visible' }"></div>
@@ -52,7 +56,7 @@ import {
   selectedCount, showSessionFilter, tabs,
 } from '../core/useTerminal'
 import { sshError } from '../core/useSsh'
-import { hostStats } from '../core/useMonitor'
+import { hostStats, monitorUnsupported } from '../core/useMonitor'
 import 'xterm/css/xterm.css'
 
 // R6 溢出菜单开关（点按钮切换，点遮罩关闭）
@@ -106,4 +110,6 @@ function fmtUptime(s: number) {
 }
 .hb-fill.warm { background: var(--dou-warn); }
 .hb-fill.hot { background: var(--dou-danger); }
+/* R7：非 Linux 主机的边界说明行（信息性，非告警） */
+.hostbar-note { color: var(--dou-dim); font-size: 12px; }
 </style>
