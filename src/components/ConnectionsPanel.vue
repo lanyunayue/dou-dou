@@ -3,7 +3,10 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { SSH_KEY } from '../core/useSsh'
+import { sshError } from '../core/useSsh'
 import { notify, askConfirm } from '../shared/feedback'
+import { connectByTarget, type ArchiveTarget } from '../core/useTerminal'
+import { navigateTo } from '../core/useNav'
 import { useRequestGuard } from '../core/useRequestGuard'
 import StateShell from './StateShell.vue'
 
@@ -92,18 +95,32 @@ async function getKey(name: string) {
   } catch (e: any) { notify('取出失败: ' + e) }
 }
 
-async function testConnect(name: string) {
-  try { notify(await invoke<string>('vault_test_connect', { name })) }
-  catch (e: any) { notify('连接失败: ' + e) }
+// R8 档案一键连接主路径：卡片主操作（按钮 / 双击）。成功直接切回终端看到会话；
+// 失败人话文案就地 notify（终端区的 sshError 覆盖层同步可见）。
+const connecting = ref('')
+async function connectArchive(t: VaultTarget, password?: string) {
+  if (connecting.value) return
+  connecting.value = t.name
+  try {
+    const req: ArchiveTarget = { name: t.name, host: t.host, port: t.port, user: t.user, key_path: t.key_path, enc_key: t.enc_key }
+    const ok = await connectByTarget(req, password)
+    if (ok) {
+      if (password !== undefined) { pwInput.value = ''; pwFor.value = '' }
+      navigateTo('term')
+    } else {
+      notify(sshError.value || `连接「${t.name}」失败：请检查主机可达性与认证方式`)
+    }
+  } catch (e: any) {
+    notify(e?.message ?? `连接「${t.name}」失败`)
+  } finally {
+    connecting.value = ''
+  }
 }
 
-/** 密码模式连接：密码仅存在于本次调用内存（Rust 侧 Zeroizing，用完即弃）。 */
-async function testConnectPw(name: string) {
-  if (!pwInput.value) { notify('请输入本次连接密码'); return }
-  try {
-    notify(await invoke<string>('vault_test_connect', { name, password: pwInput.value }))
-    pwInput.value = ''; pwFor.value = ''
-  } catch (e: any) { notify('连接失败: ' + e) }
+// 双击卡片 = 主操作：密钥目标直接连接；密码目标展开行内密码框
+function onCardDblClick(t: VaultTarget) {
+  if (t.auth === 'password' && !t.enc_key) { pwFor.value = t.name; pwInput.value = '' }
+  else void connectArchive(t)
 }
 
 function authLabel(t: VaultTarget): string {
@@ -170,25 +187,32 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
         <span class="hint">{{ quickAuth === 'password' ? '密码模式：目标只存地址，密码不入库，连接时输入（仅驻留内存）' : '密钥模式：私钥加密入库，明文只在内存解密' }}</span>
       </div>
 
-      <div v-for="t in targets" :key="t.name" class="approve-card">
+      <!-- R8：双击卡片 = 一键连接主路径；主操作按钮与双击等价 -->
+      <div v-for="t in targets" :key="t.name" class="approve-card clickable"
+           :title="`双击卡片一键连接 ${t.name}`"
+           @dblclick="onCardDblClick(t)">
         <div class="mono conn-line">
           <strong>{{ t.name }}</strong> · {{ t.user }}@{{ t.host }}:{{ t.port }}
           <span :class="t.enc_key ? 'ok-text' : (t.auth === 'password' ? 'ok-text' : 'hint')">{{ authLabel(t) }}</span>
         </div>
         <div class="hint">主机密钥：{{ fingerprintOf(`${t.host}:${t.port}`) }}</div>
         <div class="approve-actions">
-          <button type="button" class="btn ok" v-if="t.enc_key" @click="getKey(t.name)">校验密钥</button>
-          <button type="button" class="btn" v-if="t.enc_key" @click="testConnect(t.name)">用密钥连接</button>
-          <button type="button" class="btn ok" v-if="t.auth === 'password' && !t.enc_key" @click="pwFor = pwFor === t.name ? '' : t.name; pwInput = ''">
-            {{ pwFor === t.name ? '收起' : '密码连接' }}
+          <template v-if="t.auth !== 'password' || t.enc_key">
+            <button type="button" class="btn ok" :disabled="connecting === t.name" @click="connectArchive(t)">
+              {{ connecting === t.name ? '连接中…' : '⚡ 连接' }}
+            </button>
+            <button type="button" class="btn" v-if="t.enc_key" @click="getKey(t.name)">校验密钥</button>
+          </template>
+          <button type="button" class="btn ok" v-else @click="pwFor = pwFor === t.name ? '' : t.name; pwInput = ''">
+            {{ pwFor === t.name ? '收起' : '🔒 密码连接' }}
           </button>
           <button type="button" class="btn bad" @click="removeTarget(t.name)">删除</button>
         </div>
         <!-- 密码模式：本次连接密码仅驻留内存，提交后立即清空 -->
         <div v-if="pwFor === t.name" class="row pw-row">
           <input type="password" v-model="pwInput" class="filter" placeholder="本次连接密码（仅内存，不落盘）"
-                 aria-label="连接密码" autocomplete="off" @keyup.enter="testConnectPw(t.name)" />
-          <button type="button" class="btn ok" @click="testConnectPw(t.name)">连接</button>
+                 aria-label="连接密码" autocomplete="off" @keyup.enter="connectArchive(t, pwInput)" />
+          <button type="button" class="btn ok" :disabled="!pwInput || connecting === t.name" @click="connectArchive(t, pwInput)">连接</button>
         </div>
       </div>
     </div>
@@ -211,4 +235,7 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
 .pw-row .filter { max-width: 260px; }
 .conn-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .vault-state { margin-top: 4px; }
+/* R8：双击连接主路径的可供性暗示 */
+.clickable { cursor: pointer; }
+.clickable:hover { border-color: var(--dou-accent); }
 </style>

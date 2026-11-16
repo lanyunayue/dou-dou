@@ -76,13 +76,7 @@ export async function connectSsh(o: ConnectOptions) {
     }) as string
     sshError.value = ''
     activeTarget.value = { host, port: o.port, user }
-    const { term, fit } = createTerm()
-    term.write(`[已连接 ${user}@${host}:${o.port}（${o.auth === 'password' ? '密码' : '密钥'}认证）]\r\n`)
-    term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
-    tabs.value.push({ sid, title: `${user}@${host}`, term, fit })
-    activeSid.value = sid
-    showConnectForm.value = false
-    showActiveTerm()
+    attachSession(sid, `${user}@${host}`, `[已连接 ${user}@${host}:${o.port}（${o.auth === 'password' ? '密码' : '密钥'}认证）]\r\n`)
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 新建会话 ${sid.slice(0,8)} → ${user}@${host}（${o.auth === 'password' ? '密码' : '密钥'}认证）`)
   } catch (e: any) {
     handleSshFailure(e, '连接主机')
@@ -90,21 +84,64 @@ export async function connectSsh(o: ConnectOptions) {
   }
 }
 
+// 会话落地共用件：创建 xterm、写欢迎行、注册键盘写入、入 tabs（连接表单/档案连接/本地 Shell 共用）
+function attachSession(sid: string, title: string, welcome: string, extra?: Partial<TerminalTab>) {
+  const { term, fit } = createTerm()
+  term.write(welcome)
+  term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
+  tabs.value.push({ sid, title, term, fit, ...extra })
+  activeSid.value = sid
+  showConnectForm.value = false
+  showActiveTerm()
+}
+
 // 本地 Shell（学 MobaXterm 的 Local terminal）：无需远程主机，本机 PowerShell 直开
 export async function openLocalTab() {
   try {
     const sid = await invoke('open_local_pty') as string
     sshError.value = ''
-    const { term, fit } = createTerm()
-    term.write('[本地 Shell（Windows PowerShell，管道模式）]\r\n')
-    term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
-    tabs.value.push({ sid, title: '本地 Shell', term, fit, local: true })
-    activeSid.value = sid
-    showConnectForm.value = false
-    showActiveTerm()
+    attachSession(sid, '本地 Shell', '[本地 Shell（Windows PowerShell，管道模式）]\r\n', { local: true })
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 打开本地 Shell ${sid.slice(0,8)}`)
   } catch (e: any) {
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 本地 Shell 启动失败：${String(e?.message ?? e).slice(0, 80)}`)
+  }
+}
+
+// R8 档案一键连接主路径：连接管理卡片的主操作（按钮 / 双击卡片）。
+// 密钥目标 = 先校验保险库解锁且密钥可解密（vault_get_key）→ open_pty(key_path) 开标签；
+// 密码目标 = 本次密码 open_pty（密码仅本次调用内存，用完即弃）。
+// 返回 false = 失败（sshError 已带 R3 人话文案）；保险库锁定直接抛错由页面 notify。
+export interface ArchiveTarget {
+  name: string
+  host: string
+  port: number
+  user: string
+  key_path?: string
+  enc_key?: string | null
+}
+
+export async function connectByTarget(t: ArchiveTarget, password?: string): Promise<boolean> {
+  if (t.enc_key) {
+    try { await invoke('vault_get_key', { name: t.name }) }
+    catch (e: any) {
+      audit.value.unshift(`[${new Date().toLocaleTimeString()}] 档案连接 ${t.name} 失败：保险库未解锁或密钥不可用`)
+      throw new Error('保险库未解锁或密钥不可用：请到「连接管理」输入主密码解锁后重试')
+    }
+  }
+  try {
+    const sid = await invoke('open_pty', {
+      host: t.host, port: t.port, user: t.user,
+      keyPath: t.key_path || SSH_KEY,
+      password: password ?? undefined,
+    }) as string
+    sshError.value = ''
+    activeTarget.value = { host: t.host, port: t.port, user: t.user }
+    attachSession(sid, `${t.user}@${t.host}`, `[已连接 ${t.user}@${t.host}:${t.port}（档案「${t.name}」，${t.enc_key ? '密钥' : '密码'}认证）]\r\n`)
+    audit.value.unshift(`[${new Date().toLocaleTimeString()}] 档案连接 ${sid.slice(0,8)} → ${t.user}@${t.host}（${t.name}）`)
+    return true
+  } catch (e: any) {
+    handleSshFailure(e, `连接档案「${t.name}」`)
+    return false
   }
 }
 
