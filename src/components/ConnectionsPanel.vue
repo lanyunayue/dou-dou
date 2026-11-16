@@ -37,12 +37,16 @@ const guard = useRequestGuard()
 const quickName = ref(''); const quickHost = ref(''); const quickPort = ref(22); const quickUser = ref('dou')
 const quickAuth = ref<'key' | 'password'>('key')
 const masterPw = ref('')
+// R10：主密码无后门、无找回——初始化前必须显式勾选确认「忘记 = 档案不可恢复」
+const initAgreed = ref(false)
 /** 密码模式目标的「本次连接密码」：只驻留内存，随输入/用完即清，不落盘 */
 const pwFor = ref(''); const pwInput = ref('')
 
-/** 保险库初始化/解锁（原「凭据保险库」页入口迁入此处）。 */
+/** 保险库初始化/解锁（原「凭据保险库」页入口迁入此处）。
+ *  R10：初始化前强制勾选不可恢复告知，防误初始化后档案永久丢失。 */
 async function vaultInit() {
-  try { await invoke('vault_init', { master: masterPw.value }); unlocked.value = true; masterPw.value = ''; await load(); notify('保险库已初始化并解锁') }
+  if (!initAgreed.value) { notify('请先勾选确认「忘记主密码 = 档案不可恢复」，再进行初始化'); return }
+  try { await invoke('vault_init', { master: masterPw.value }); unlocked.value = true; masterPw.value = ''; initAgreed.value = false; await load(); notify('保险库已初始化并解锁') }
   catch (e: any) { notify('初始化失败: ' + e) }
 }
 async function vaultUnlock() {
@@ -56,16 +60,26 @@ function vaultLock() {
 async function load() {
   const id = guard.begin()
   shell.value = 'loading'
+  let keys: any[] = []
+  try { keys = await invoke<any[]>('host_key_list') } catch { keys = [] }
   try {
     const list = await invoke<VaultTarget[]>('vault_list_targets')
-    const keys = await invoke<any[]>('host_key_list')
     if (!guard.isCurrent(id)) return
     targets.value = list
     hostKeys.value = keys
     shell.value = list.length ? 'ready' : 'empty'
   } catch (e: any) {
     if (!guard.isCurrent(id)) return
-    errorText.value = '加载连接档案失败：' + (e?.message ?? String(e))
+    const msg = String(e?.message ?? e)
+    // R10 前置修复：锁定/未初始化是正常业务态——解锁/初始化表单必须常显可触达，
+    // 不能被整页 error 态覆盖（否则用户无法自助解锁，只能无限重试）。
+    if (msg.includes('锁定') || msg.includes('未初始化')) {
+      targets.value = []
+      hostKeys.value = keys
+      shell.value = 'ready'
+      return
+    }
+    errorText.value = '加载连接档案失败：' + msg
     shell.value = 'error'
   }
 }
@@ -161,9 +175,14 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
       <div class="row vault-state">
         <template v-if="!unlocked">
           <input v-model="masterPw" type="password" class="filter" placeholder="主密码" aria-label="保险库主密码" @keyup.enter="vaultUnlock" />
-          <button type="button" class="btn" @click="vaultInit">初始化</button>
+          <button type="button" class="btn" :disabled="!initAgreed" title="需先勾选下方不可恢复告知" @click="vaultInit">初始化</button>
           <button type="button" class="btn ok" @click="vaultUnlock">解锁</button>
           <span class="hint">首次使用先「初始化」；解锁后可新增主机。锁定时清除内存密钥。</span>
+          <!-- R10：主密码不可恢复告知（仅初始化需勾选；解锁已有保险库无需勾选） -->
+          <label class="hint agree-row agree-full">
+            <input v-model="initAgreed" type="checkbox" aria-label="确认忘记主密码不可恢复" />
+            我已知晓：忘记主密码 = 档案不可恢复（应用无后门、无找回渠道），请务必牢记主密码（仅初始化需勾选）
+          </label>
         </template>
         <template v-else>
           <span class="hint ok-text">保险库已解锁</span>
@@ -231,6 +250,16 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
   padding: 0 4px;
 }
 .hint-row { margin-top: -6px; margin-bottom: 8px; }
+/* R10：不可恢复告知行（勾选确认，整行占满） */
+.agree-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  max-width: 64ch;
+  cursor: pointer;
+}
+.agree-full { flex-basis: 100%; }
+.agree-row input[type='checkbox'] { margin-top: 3px; }
 .pw-row { margin-top: 8px; }
 .pw-row .filter { max-width: 260px; }
 .conn-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

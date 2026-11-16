@@ -39,6 +39,23 @@ export interface TerminalTab {
   badge?: number
   /** 本地 Shell 会话（不走 SSH，远程主机不可达时也可用） */
   local?: boolean
+  /** R11 会话元数据（持久化恢复用，不含密码等敏感信息） */
+  meta?: SessionMeta
+}
+
+/** R11 会话元数据：只存档案名/认证方式/主机地址等非敏感信息，绝不含密码。
+ *  密码认证会话因此重启后无法自动恢复——这是有意的安全边界，不是缺陷。 */
+export interface SessionMeta {
+  kind: 'ssh' | 'local'
+  title: string
+  host?: string
+  port?: number
+  user?: string
+  auth?: 'key' | 'password'
+  archiveName?: string
+  /** 非敏感：磁盘密钥路径，恢复时直接复用 */
+  keyPath?: string
+  ts: number
 }
 
 /** 主机监控一轮采样（host_stats 事件 payload，Rust monitor.rs） */

@@ -62,6 +62,15 @@ onMounted(async () => { await load() })
         本应用无遥测、无 CDN 依赖、无网络升级通道。
       </div>
     </div>
+
+    <!-- R9 安全说明：文案与 vault.rs / lib.rs 实现逐条对齐，只写代码真实做到的事 -->
+    <div class="wizard">
+      <h3 class="sec-title">安全说明</h3>
+      <div class="set-row"><span class="set-k">连接密码</span><span class="hint">仅驻留内存、不落盘、不写日志，退出应用即清除——因此密码认证的会话重启后无法自动恢复，需重新输入。</span></div>
+      <div class="set-row"><span class="set-k">SSH 私钥</span><span class="hint">以 AES-256-GCM 加密存入本机保险库文件；明文只在解锁后的内存中短暂存在（用完即清零），「锁定」或退出应用即失效。</span></div>
+      <div class="set-row"><span class="set-k">主密码</span><span class="hint">只用于派生加密密钥（PBKDF2-HMAC-SHA256，60 万次迭代，符合 OWASP 建议），本身不存储、不联网——忘记主密码 = 档案不可恢复（无后门、无找回）。</span></div>
+      <div class="set-row"><span class="set-k">主机指纹</span><span class="hint">首次连接时记录（防中间人冒充），可在「连接管理」逐条核对；不匹配时会明确提示，不会静默放行。</span></div>
+    </div>
   </StateShell>
 </template>
 

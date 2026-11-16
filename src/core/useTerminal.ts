@@ -7,7 +7,8 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { activeTarget, SSH_KEY, sshError, audit, handleSshFailure, type SshTarget } from './useSsh'
-import type { TerminalTab } from '../shared/types'
+import { notify } from '../shared/feedback'
+import type { TerminalTab, SessionMeta } from '../shared/types'
 
 // 终端状态：多会话标签 / 当前会话 / 检索 / 广播
 export const termEl = ref<HTMLDivElement>()
@@ -18,6 +19,34 @@ export const broadcast = ref('')
 // 新建连接表单：无会话时默认呈现（R1 首屏主路径），可手动开关
 export const showConnectForm = ref(true)
 let windowFocused = true
+
+// R11 会话恢复：标签元数据（档案名/认证方式/主机地址，绝不含密码）持久化到
+// localStorage；重启后终端区提供「恢复上次会话」一键入口。密码认证会话无法
+// 自动恢复（密码不落盘是有意为之的安全边界），恢复时跳过并计数提示。
+const SESSION_META_KEY = 'dou_session_meta'
+
+export const lastSessions = ref<SessionMeta[]>(readLastSessions())
+export const restoringSessions = ref(false)
+export const restoreEntryVisible = computed(() => lastSessions.value.length > 0 && tabs.value.length === 0)
+export const restorableCount = computed(() =>
+  lastSessions.value.filter(m => m.kind === 'local' || m.auth !== 'password').length
+)
+
+function readLastSessions(): SessionMeta[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(SESSION_META_KEY) ?? '[]')
+    return Array.isArray(list)
+      ? list.filter(m => m && typeof m.kind === 'string' && typeof m.ts === 'number')
+      : []
+  } catch { return [] }
+}
+
+function persistSessionMeta() {
+  try {
+    const list = tabs.value.map(t => t.meta).filter((m): m is SessionMeta => !!m)
+    localStorage.setItem(SESSION_META_KEY, JSON.stringify(list))
+  } catch { /* 存储不可用时跳过：会话恢复是尽力而为的辅助功能 */ }
+}
 
 // 表单可见 = 无任何会话，或用户主动打开（连接成功后自动收起）
 export const connectFormVisible = computed(() => tabs.value.length === 0 || showConnectForm.value)
@@ -76,7 +105,9 @@ export async function connectSsh(o: ConnectOptions) {
     }) as string
     sshError.value = ''
     activeTarget.value = { host, port: o.port, user }
-    attachSession(sid, `${user}@${host}`, `[已连接 ${user}@${host}:${o.port}（${o.auth === 'password' ? '密码' : '密钥'}认证）]\r\n`)
+    attachSession(sid, `${user}@${host}`, `[已连接 ${user}@${host}:${o.port}（${o.auth === 'password' ? '密码' : '密钥'}认证）]\r\n`, {
+      meta: { kind: 'ssh', title: `${user}@${host}`, host, port: o.port, user, auth: o.auth, ts: Date.now() },
+    })
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 新建会话 ${sid.slice(0,8)} → ${user}@${host}（${o.auth === 'password' ? '密码' : '密钥'}认证）`)
   } catch (e: any) {
     handleSshFailure(e, '连接主机')
@@ -95,6 +126,7 @@ function attachSession(sid: string, title: string, welcome: string, extra?: Part
   activeSid.value = sid
   showConnectForm.value = false
   showActiveTerm()
+  persistSessionMeta()
 }
 
 // 本地 Shell（学 MobaXterm 的 Local terminal）：无需远程主机，本机 PowerShell 直开。
@@ -109,7 +141,7 @@ export async function openLocalTab() {
       r.sid,
       isConpty ? '本地 Shell' : '本地 Shell（基础模式）',
       `[本地 Shell（Windows PowerShell · ${isConpty ? 'ConPTY 真终端' : '基础模式：系统不支持 ConPTY，画面交互受限'}）]\r\n`,
-      { local: true }
+      { local: true, meta: { kind: 'local', title: '本地 Shell', ts: Date.now() } }
     )
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 打开本地 Shell ${r.sid.slice(0,8)}（${isConpty ? 'ConPTY' : '管道'}模式）`)
   } catch (e: any) {
@@ -146,7 +178,12 @@ export async function connectByTarget(t: ArchiveTarget, password?: string): Prom
     }) as string
     sshError.value = ''
     activeTarget.value = { host: t.host, port: t.port, user: t.user }
-    attachSession(sid, `${t.user}@${t.host}`, `[已连接 ${t.user}@${t.host}:${t.port}（档案「${t.name}」，${t.enc_key ? '密钥' : '密码'}认证）]\r\n`)
+    attachSession(sid, `${t.user}@${t.host}`, `[已连接 ${t.user}@${t.host}:${t.port}（档案「${t.name}」，${t.enc_key ? '密钥' : '密码'}认证）]\r\n`, {
+      meta: {
+        kind: 'ssh', title: `${t.user}@${t.host}`, host: t.host, port: t.port, user: t.user,
+        auth: t.enc_key ? 'key' : 'password', archiveName: t.name, keyPath: t.key_path, ts: Date.now(),
+      },
+    })
     audit.value.unshift(`[${new Date().toLocaleTimeString()}] 档案连接 ${sid.slice(0,8)} → ${t.user}@${t.host}（${t.name}）`)
     return true
   } catch (e: any) {
@@ -171,6 +208,33 @@ export function closeTab(sid: string) {
   tabs.value = tabs.value.filter(t=>t.sid!==sid)
   if (activeSid.value === sid && tabs.value.length) switchTab(tabs.value[0].sid)
   else showActiveTerm()
+  persistSessionMeta()
+}
+
+// R11：一键恢复上次会话。本地 Shell 直接重开；密钥认证档案按存档参数重连；
+// 密码认证会话跳过（密码不落盘，无法自动恢复——安全边界，恢复完成时明确告知）。
+export async function restoreLastSessions() {
+  if (restoringSessions.value) return
+  restoringSessions.value = true
+  try {
+    let needPw = 0, failed = 0
+    for (const m of lastSessions.value) {
+      if (m.kind === 'local') { await openLocalTab(); continue }
+      if (m.auth === 'password' || !m.host) { needPw++; continue }
+      const ok = await connectByTarget({
+        name: m.archiveName ?? `${m.user ?? ''}@${m.host}`,
+        host: m.host, port: m.port ?? 22, user: m.user ?? 'root', key_path: m.keyPath,
+      })
+      if (!ok) failed++
+    }
+    lastSessions.value = []
+    const notes: string[] = []
+    if (needPw) notes.push(`${needPw} 个密码认证会话需重新输入密码（密码不落盘，无法自动恢复）`)
+    if (failed) notes.push(`${failed} 个会话恢复失败（主机不可达或密钥不可用）`)
+    notify(notes.length ? `会话恢复完成：${notes.join('；')}` : '上次会话已恢复')
+  } finally {
+    restoringSessions.value = false
+  }
 }
 
 export function cleanExport(raw: string): string {

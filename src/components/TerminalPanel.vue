@@ -36,6 +36,15 @@
     <div v-else-if="monitorUnsupported" class="hostbar hostbar-note" role="status" aria-label="监控边界说明">
       ⓘ {{ monitorUnsupported }}
     </div>
+    <!-- R11 会话恢复入口：上次退出有会话且当前无会话时出现（不抢占连接表单主视觉） -->
+    <div v-if="restoreEntryVisible" class="restore-bar" role="status" aria-label="恢复上次会话">
+      <span class="hint">
+        上次退出时有 {{ lastSessions.length }} 个会话，其中 {{ restorableCount }} 个可自动恢复（密码认证会话需重新输入密码）
+      </span>
+      <button type="button" class="btn ok restore-btn" :disabled="restoringSessions" @click="restoreLastSessions">
+        {{ restoringSessions ? '恢复中…' : '↺ 恢复上次会话' }}
+      </button>
+    </div>
     <div class="term-wrap">
       <div :ref="setTermEl" class="terminal" :style="{ visibility: formVisible ? 'hidden' : 'visible' }"></div>
       <!-- 优雅离线态：不黑屏 / 不纯白 / 不裸 os error / 不伪造连接成功 -->
@@ -54,6 +63,7 @@ import {
   termEl, activeSid, sessionFilter, broadcast, visibleTabs, connectFormVisible as formVisible,
   toggleConnectForm, openLocalTab, switchTab, closeTab, exportTerm, doBroadcast,
   selectedCount, showSessionFilter, tabs,
+  lastSessions, restorableCount, restoringSessions, restoreEntryVisible, restoreLastSessions,
 } from '../core/useTerminal'
 import { sshError } from '../core/useSsh'
 import { hostStats, monitorUnsupported } from '../core/useMonitor'
@@ -112,4 +122,15 @@ function fmtUptime(s: number) {
 .hb-fill.hot { background: var(--dou-danger); }
 /* R7：非 Linux 主机的边界说明行（信息性，非告警） */
 .hostbar-note { color: var(--dou-dim); font-size: 12px; }
+/* R11：会话恢复入口（信息性一行，弱化于连接表单主视觉） */
+.restore-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--dou-panel-alt);
+  border-bottom: 1px solid var(--dou-border);
+}
+.restore-btn { height: 24px; }
 </style>
