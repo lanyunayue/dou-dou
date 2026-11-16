@@ -5,6 +5,11 @@
     <div v-for="t in pendingTasks" :key="t.id" class="approve-card">
       <div class="mono cmd">{{ t.command }}</div>
       <div class="hint">原因：{{ t.reason }}</div>
+      <div class="hint meta">
+        <span v-if="t.impact">预计影响：{{ t.impact }}</span>
+        <span v-if="t.target_path">目标路径：{{ t.target_path }}</span>
+        <span v-if="t.history_count > 0">历史同类 {{ t.history_count }} 次</span>
+      </div>
       <div class="approve-actions">
         <button class="btn ok" @click="decideTask(t.id, true, false)">一次允许</button>
         <button class="btn ok" :disabled="t.policy==='change'" :title="t.policy==='change' ? '变更档不可关闭审批' : ''" @click="decideTask(t.id, true, true)">本次任务内允许</button>
@@ -18,3 +23,8 @@
 <script setup lang="ts">
 import { pendingTasks, rejectNotes, pendingCount, decideTask } from '../composables/useApproval'
 </script>
+
+<style scoped>
+.approve-card .meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+.approve-card .meta span { color: var(--color-text-secondary, #6b6b64); }
+</style>
