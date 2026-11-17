@@ -11,7 +11,7 @@
 
 | 项 | 状态 | 指向 |
 |---|---|---|
-| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `906642d`（2026-11-16 MobaXterm 三能力：密码认证兜底/本地 Shell 降级标签/主机监控条） |
+| 客户端真源 | ✅ `dou-handover-20261113-2139\dou-app`，git 干净 | HEAD `8f9d2d4`（2026-11-17 产品整改 R1-R11 七批次闭环 + pty unsafe 清理 `d1c5f42` + dev 冷启动修复 `8f9d2d4`） |
 | 网关真源 | ✅ `dou-handover-20261113-2139\dou-workspace`（`crates/dou-gateway`），git 干净 | HEAD `bc29000`（2026-11-16 本会话 S3 网关支撑：/policy/rules+/snapshots+audit 判定过滤） |
 | 废弃镜像 | `dou-workspace/app/` 已标 DEPRECATED，不在其上开发 | commit `67be637` |
 | 回滚点 | 🔴 `_backup-20261113-2350`（恢复 git 前快照，207 文件）勿动 | 磁盘体检报告 |
@@ -46,7 +46,7 @@
 | 前端单测 | `npm run test`（dou-app） | 16 passed（useApproval 12 + useRequestGuard 4） | ✅ 2026-11-16 本会话（verify §9） |
 | 命令契约 | `python tools/verify-invoke.py` | 25 条无缺失 | ✅ 2026-11-16（verify §7） |
 | SSH 主线 | `cargo run --bin dou-ssh-selfcheck` | 10/10（TOFU、公钥认证、分块传输、断点续传、密钥变更拒绝） | ✅ 2026-11-16（verify §8） |
-| **真窗口** | `npm run tauri dev` | 窗口存在（1320×1000、标题「豆Dou」）+ 内容区非白屏 + 无崩溃 | ✅ 2026-11-16 本会话实测（S3 精修版截图 `d:\dou\app-window-s3-final.png`：暗色标题栏无白断层、三栏布局/侧栏分组/四态空态渲染正常；靶机未连接空态属功能性异常非渲染异常） |
+| **真窗口** | `npm run tauri dev` | 窗口存在（1320×1000、标题「豆Dou」）+ 内容区非白屏 + 无崩溃 | ✅ 2026-11-17 复验（含**冷启动**：截图 `d:\dou\app-window-rectification-final.png`，暗色标题栏/三栏布局/R1 连接表单/R2 侧栏分组/R11 恢复条在位；冷启动曾被 CLI schema 校验拒绝，见追记第七轮修复） |
 
 ### §3 追记（2026-11-16 第二轮）
 
@@ -86,6 +86,14 @@
 - **环境边界**：本机 127.0.0.1:22 无 sshd 监听且私钥不存在，密码认证的「连接成功」全链路与监控条真实数据留待靶机就绪后逐屏验收（S1-2）；解析逻辑由 monitor 3 例单测 + 回环自校验 10/10 覆盖。
 - **复验**：verify.sh **28 PASS / 0 FAIL**（`cargo test --lib` 14/14、clippy 0 警告、fmt 0 差异、vue-tsc 0 error、前端 16/16、分层 0 违规、命令契约无缺失）；新增 UIA 点击工具 `d:\dou\scripts\uia-click.ps1`（UIAutomation 按名称点按钮，配 capture-window.ps1 构成真窗口交互验证链）。
 
+### §3 追记（2026-11-17 第七轮：产品整改 R1-R11 闭环 + dev 冷启动修复）
+
+- **R1-R11 七批次全部落地**（`74bf133` R1+R5 → `358bea7` R3 → `1c7152b` R2 → `bc99515` R6 → `c81c8aa` R8 → `ec9c230` R4 → `e422ac0` R7 → `02fece1` R9/R10/R11），逐批次要点与真窗口端到端证据见 `docs/PRODUCT-RECTIFICATION.md` §7 执行记录。
+- **附带清理** `d1c5f42`：pty.rs ConPTY 线程闭包内 2 处冗余 `unsafe`（外层 unsafe 词法作用域已覆盖），触发 `unused_unsafe` 警告违反 clippy 0 警告门禁，移除后 verify.sh 28/28 复跑通过。
+- **dev 冷启动修复** `8f9d2d4`：`npm run tauri dev` 冷启动被 `@tauri-apps/cli` 2.12.x 拒绝（exit 1，内置 `config.schema.json` 对 `windows[].theme` 的 Option<Enum> 字段 anyOf 误报；此前 S3 加 theme 后 dev 一直靠旧实例 HMR 存活，从未冷启动过故未暴露）。修复：theme 从 tauri.conf.json 迁移至 `lib.rs` setup 运行时 `set_theme(Theme::Dark)`，对任意 CLI 版本稳定，`tauri build`（S4）同样受益。**教训**：verify.sh 不覆盖 tauri dev 冷启动，窗口配置类改动必须做一次真冷启动验证。
+- **复验**：verify.sh **28 PASS / 0 FAIL** ×2（unsafe 清理后、主题修复后）；真窗口冷启动截图 `d:\dou\app-window-rectification-final.png`（暗色标题栏保留、三栏布局、R1 表单/R2 分组/R3 动作链接/R11 恢复条全部在位）。
+- **遗留**：S1-2 逐屏人工验收（R10 初始化拦截、R1 清空 app_data 冷启动复核）；密码会话自动恢复「提示重输」与密钥档案真实重连待靶机就绪。
+
 ## 4. 功能工单现状（S0→S4 视角，详见 接下来计划-20261115.md §3）
 
 | 工单 | 状态 | 指向 |
@@ -108,7 +116,7 @@
 | S3-验证 真窗口视觉复核 | ✅ 本会话闭环（两轮截屏复核 + 精致化批次落地 + 设计决策登记；截图 `app-window-s3-final.png`） | §3 追记第五轮 |
 | MobaXterm 三能力（密码兜底/本地 Shell/监控条） | ✅ 本会话提交（dou-app `906642d`：Rust 三层 + 前端接线 + 真窗口验证本地 Shell 与监控空态；密码全链路待靶机就绪） | §3 追记第六轮 |
 | S4 打包/内测 | 🔴 移出计划（用户指示 2026-11-16：先产品后打包；签名/自动更新/i18n 同步暂缓） | docs/PRODUCT-RECTIFICATION.md §5 |
-| 产品整改工单 R1-R11（P0 首屏可用性 3 项 / P1 露馅点 5 项 / P2 信任叙事 3 项） | ⏸ 未开始（来源：2026-11-16 真实用户视角体验复核 + 三能力闭环后的产品判断；执行顺序 R1→R5→R3→R2→R6→R8→R4→R7→R9/R10→R11，每单含可复跑验收标准） | docs/PRODUCT-RECTIFICATION.md |
+| 产品整改工单 R1-R11（P0 首屏可用性 3 项 / P1 露馅点 5 项 / P2 信任叙事 3 项） | ✅ 完成（2026-11-16/17 七批次 `74bf133`→`02fece1` 全部落地 + 真窗口端到端验收；附带 dev 冷启动修复 `8f9d2d4`） | docs/PRODUCT-RECTIFICATION.md §7 |
 
 ## 5. 网关安全硬约束（🔴 不改不放松）
 

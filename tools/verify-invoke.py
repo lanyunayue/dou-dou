@@ -1,4 +1,4 @@
-"""核对前端 invoke() 调用集与 24 条基线命令是否一致。
+"""核对前端 invoke() 调用集与基线命令是否一致。
 
 用法（在 dou-app/ 下执行）：
     python ../dou-workspace/tools/verify-invoke.py
@@ -22,13 +22,14 @@ for p in sorted(root.rglob("*")):
         for m in pat.finditer(txt):
             found.setdefault(m.group(1), []).append(f"{p.name}:{txt[:m.start()].count(chr(10))+1}")
 
-# 基线 25 条：11-13 前端重构新增 vault_test_connect（保险库解锁态连接自测），
-# Rust 侧 lib.rs 的 #[tauri::command] fn vault_test_connect 同步存在，属正常新增。
-# 注：generate_handler![] 注册 27 个命令，其中部分是前端未直接调用的，口径不同。
+# 基线 24 条：11-13 前端重构新增的保险库命令族，R8(c81c8aa) 起「自测连接」
+# 入口被真会话连接（connectByTarget）取代，vault_test_connect 移出前端基线；
+# Rust 侧保留该命令仅为兼容，不在前端基线内。
+# 注：generate_handler![] 注册数与前端基线条数口径不同，部分命令前端不直接调用。
 base = set("""gateway_request gateway_status gateway_token host_key_forget host_key_list
 open_pty pty_write remote_stat sftp_download sftp_list sync_folders tq_cancel tq_clear
 tq_enqueue tq_list tq_pause tq_resume vault_add_target vault_get_key vault_init
-vault_list_targets vault_lock vault_remove_target vault_test_connect vault_unlock""".split())
+vault_list_targets vault_lock vault_remove_target vault_unlock""".split())
 
 cur = set(found)
 print(f"扫描目录: {root.resolve()}")
