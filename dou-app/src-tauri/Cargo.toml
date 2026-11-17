@@ -1,0 +1,65 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "app_lib"
+# Tauri 官方模板默认三件套；cdylib 在 MinGW(GNU) 工具链下会生成 app_lib.dll，
+# 依赖树过大触发 ld 的 "export ordinal too large" 限制。本项目已固定 MSVC
+# (link.exe)，无导出序号上限，故恢复官方默认配置。
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-notification = "2"
+# R13 终端复制粘贴：系统剪贴板读写（WebView2 对 navigator.clipboard.readText 权限不可靠，走官方插件）
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+russh = { version = "0.65", default-features = false, features = ["ring"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+# 历史遗留依赖已移除（2026-11-14 复核：src/ 全域零引用）：
+#   russh-sftp = "3.0" —— SFTP 目录树用 exec `ls -1p` 解析（见 src/sftp.rs），未走 SFTP 协议栈。
+#   sha2 = "0.10"      —— 指纹走 ssh-key 的 HashAlg::Sha256（ssh-key 自带 sha2 0.11 传递依赖）。
+# 若将来要改回真正的 SFTP 协议或自行算摘要，再按需加回并同步 Cargo.lock。
+# 凭据保险库：主密码派生(PBKDF2) + 对称加密(AES-256-GCM)。二者均已在 Cargo.lock 中，离线可构建。
+ring = "0.17"
+aes-gcm = "0.11"
+base64 = "0.22"
+# 明文私钥用完即清（Zeroizing 在 drop 时自动擦除内存）。已在 Cargo.lock 中（ssh-key 的传递依赖），离线可构建。
+zeroize = "1.9"
+
+# R4 本地 Shell ConPTY 真终端：CreatePseudoConsole + 管道转发。
+# windows 0.62 已在 Cargo.lock（tauri 传递依赖），显式声明仅启用所需 feature，离线可构建。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

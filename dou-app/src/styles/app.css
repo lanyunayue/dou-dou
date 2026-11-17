@@ -1,0 +1,572 @@
+/*
+ * 全局样式表 —— S3 暗色终端风设计体系。
+ *
+ * 规则：
+ * 1. 所有颜色/字号/间距/动效一律引用 :root 的 --dou-* 变量；变量与
+ *    src/shared/tokens.ts 一一对应，改色必须两侧同步。
+ * 2. 无障碍基线：正文 ≥14px、主交互元素 ≥44px 触控目标、
+ *    :focus-visible 高亮、prefers-reduced-motion 降级、960px 单列降级。
+ * 3. 拆分自 App.vue scoped 的历史类名全部保留（子组件 DOM 依赖），
+ *    仅视觉层随 token 重写。
+ */
+
+:root {
+  /* ---- 颜色 ---- */
+  --dou-bg: #0a0f0d;
+  --dou-panel: #101614;
+  --dou-panel-alt: #151d1a;
+  --dou-border: #223029;
+  --dou-border-strong: #35473d;
+  --dou-text: #d6e2d9;
+  --dou-dim: #9fb4a8;
+  --dou-accent: #5ce8a4;
+  --dou-accent-strong: #7df0bb;
+  --dou-ok: #4ade80;
+  --dou-ok-text: #6ee7b7;
+  --dou-warn: #f0b429;
+  --dou-warn-text: #f5c66b;
+  --dou-danger: #f87171;
+  --dou-danger-text: #fca5a5;
+  --dou-info: #7cc4f0;
+  --dou-ok-bg: #0e2a1c;
+  --dou-warn-bg: #2b2410;
+  --dou-danger-bg: #2b1414;
+
+  /* ---- 字体 ---- */
+  --dou-font-mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dou-font-ui: "Cascadia Code", "Cascadia Mono", Consolas, "Segoe UI", "Microsoft YaHei", sans-serif;
+
+  /* ---- 字号 ---- */
+  --dou-fs-xs: 12px;
+  --dou-fs-sm: 13px;
+  --dou-fs-body: 14px;
+  --dou-fs-lg: 16px;
+  --dou-fs-xl: 20px;
+
+  /* ---- 几何 ---- */
+  --dou-radius-sm: 4px;
+  --dou-radius-md: 8px;
+  --dou-touch: 44px;
+
+  /* ---- 动效 ---- */
+  --dou-dur-fast: 120ms;
+  --dou-dur-normal: 200ms;
+}
+
+/* ---------- 基础 ---------- */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--dou-bg);
+  color: var(--dou-text);
+  font-family: var(--dou-font-ui);
+  font-size: var(--dou-fs-body);
+  line-height: 1.55;
+}
+
+/* 键盘可达性：统一焦点环 */
+:focus-visible {
+  outline: 2px solid var(--dou-accent);
+  outline-offset: 2px;
+  border-radius: var(--dou-radius-sm);
+}
+
+/* 减动效：关闭过渡/动画（呼吸点、光标闪烁等） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 暗色滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--dou-border-strong); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dou-dim); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------- 应用外壳 / 侧边栏 ---------- */
+.app-shell { display: flex; height: 100vh; background: var(--dou-bg); }
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--dou-panel);
+  border-right: 1px solid var(--dou-border);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+}
+.brand {
+  font-size: var(--dou-fs-xl);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--dou-accent);
+  margin-bottom: 10px;
+  white-space: nowrap;
+}
+/* 终端提示符光标：闪烁块 */
+.brand::after {
+  content: "▮";
+  margin-left: 6px;
+  color: var(--dou-accent);
+  animation: dou-blink 1.1s steps(1) infinite;
+}
+@keyframes dou-blink { 50% { opacity: 0; } }
+
+.gateway {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: var(--dou-fs-xs);
+  border: 1px solid var(--dou-border-strong);
+  background: var(--dou-danger-bg);
+  color: var(--dou-danger-text);
+  white-space: nowrap;
+}
+/* 状态呼吸点 */
+.gateway::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dou-danger);
+  animation: dou-breathe 2.2s ease-in-out infinite;
+}
+.gateway.on { background: var(--dou-ok-bg); color: var(--dou-ok-text); border-color: var(--dou-ok); }
+.gateway.on::before { background: var(--dou-ok); }
+@keyframes dou-breathe { 50% { opacity: 0.35; } }
+
+.endpoint { font-size: var(--dou-fs-xs); color: var(--dou-dim); margin: 10px 0 6px; word-break: break-all; }
+.conn-hint { font-size: var(--dou-fs-xs); color: var(--dou-dim); margin: 0 0 12px; line-height: 1.6; }
+
+/* R3 状态区：远程主机状态独立成行，未连接时给动作链接而非干巴巴的文案 */
+.host-status {
+  font-size: var(--dou-fs-xs);
+  color: var(--dou-text);
+  margin: 0 0 12px;
+  line-height: 1.8;
+  word-break: break-all;
+}
+.host-status.bad { color: var(--dou-dim); }
+.linklike {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 8px 0 2px;
+  font: inherit;
+  font-size: var(--dou-fs-xs);
+  color: var(--dou-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.linklike:hover { color: var(--dou-accent-strong, var(--dou-accent)); }
+
+/* ---------- 导航 ---------- */
+.nav { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.nav-group {
+  margin: 14px 0 4px;
+  padding: 0 12px;
+  font-size: var(--dou-fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--dou-dim);
+  text-transform: uppercase;
+}
+.nav-group::before { content: ":: "; color: var(--dou-accent); }
+/* R2：「高级」可折叠分组标题（可点击） */
+.nav-toggle {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  user-select: none;
+}
+.nav-toggle:hover { color: var(--dou-text); }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--dou-touch);
+  padding: 6px 12px;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--dou-radius-sm);
+  background: transparent;
+  color: var(--dou-text);
+  font-family: inherit;
+  font-size: var(--dou-fs-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dou-dur-fast), color var(--dou-dur-fast);
+}
+.nav-item:hover { background: var(--dou-panel-alt); }
+/* 当前项：accent 左条 + 提示符前缀（aria-current="page" 与 .active 双通道） */
+.nav-item.active {
+  border-left-color: var(--dou-accent);
+  background: var(--dou-panel-alt);
+  color: var(--dou-accent-strong);
+  font-weight: 700;
+}
+
+/* ---------- 主区 ---------- */
+.workspace { flex: 1; min-width: 0; padding: 10px; display: flex; flex-direction: column; }
+
+/* 四区栅格：左上=文件树，右上=终端，左下=编辑器 */
+.grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+.panel {
+  background: var(--dou-panel);
+  border-radius: var(--dou-radius-md);
+  border: 1px solid var(--dou-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.panel-files { grid-row: 1 / 3; }
+.panelhead {
+  padding: 8px 12px;
+  font-size: var(--dou-fs-sm);
+  font-weight: 700;
+  background: var(--dou-panel-alt);
+  border-bottom: 1px solid var(--dou-border);
+  color: var(--dou-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 终端提示符装饰 */
+.panelhead::before { content: "> "; color: var(--dou-accent); font-weight: 400; }
+
+.filelist { overflow-y: auto; padding: 6px 0; flex: 1; }
+.fileitem {
+  padding: 4px 14px;
+  cursor: pointer;
+  font-size: var(--dou-fs-sm);
+  font-family: var(--dou-font-mono);
+  color: var(--dou-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fileitem:hover { background: var(--dou-panel-alt); }
+.icon { margin-right: 6px; }
+
+.tabbar { display: flex; gap: 6px; padding: 6px; background: var(--dou-panel-alt); border-bottom: 1px solid var(--dou-border); align-items: center; flex-wrap: wrap; }
+.tab {
+  padding: 4px 12px;
+  background: var(--dou-panel);
+  border: 1px solid var(--dou-border);
+  border-radius: var(--dou-radius-sm);
+  font-size: var(--dou-fs-xs);
+  font-family: var(--dou-font-mono);
+  color: var(--dou-dim);
+  cursor: pointer;
+  min-height: 28px;
+}
+.tab:hover { color: var(--dou-text); border-color: var(--dou-border-strong); }
+.tab.active { background: var(--dou-accent); color: var(--dou-bg); border-color: var(--dou-accent); font-weight: 700; }
+.tabadd { border: none; background: transparent; color: var(--dou-dim); cursor: pointer; font-size: var(--dou-fs-lg); min-height: 28px; min-width: 28px; }
+.tabadd:hover { color: var(--dou-accent); }
+/* R6：「+」主按钮化——新建连接是终端面板的第一动作 */
+.tabadd.primary {
+  background: var(--dou-accent);
+  color: var(--dou-bg);
+  font-weight: 700;
+  border-radius: var(--dou-radius-sm);
+  padding: 0 10px;
+}
+.tabadd.primary:hover { background: var(--dou-accent-strong); color: var(--dou-bg); }
+/* R6：溢出菜单（⋯）——低频动作收纳，遮罩点击关闭 */
+.overflow { position: relative; margin-left: auto; }
+.overflow-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 170px;
+  background: var(--dou-panel);
+  border: 1px solid var(--dou-border-strong);
+  border-radius: var(--dou-radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+.overflow-menu button {
+  border: none;
+  background: none;
+  color: var(--dou-text);
+  font: inherit;
+  font-size: var(--dou-fs-xs);
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-radius: var(--dou-radius-sm);
+  white-space: nowrap;
+}
+.overflow-menu button:hover { background: var(--dou-panel-alt); color: var(--dou-accent-strong); }
+.overflow-mask { position: fixed; inset: 0; z-index: 25; }
+.broadcast {
+  flex: 1;
+  min-width: 120px;
+  margin-left: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--dou-border);
+  border-radius: var(--dou-radius-sm);
+  font-size: var(--dou-fs-xs);
+  background: var(--dou-bg);
+  color: var(--dou-text);
+}
+
+.term-wrap { flex: 1; position: relative; min-height: 0; display: flex; }
+.terminal { flex: 1; background: var(--dou-bg); padding: 6px; }
+.editorarea { flex: 1; min-height: 0; }
+.editorbar {
+  padding: 6px 10px;
+  border-top: 1px solid var(--dou-border);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: var(--dou-panel-alt);
+}
+.hint { font-size: var(--dou-fs-xs); color: var(--dou-dim); line-height: 1.6; }
+/* 编辑器保存按钮：主操作视觉（与「一键重试」同语言），避免被当成纯文本 */
+.editorbar .btn {
+  width: auto;
+  min-width: 96px;
+  background: var(--dou-ok-bg);
+  border-color: var(--dou-ok);
+  color: var(--dou-ok-text);
+}
+.editorbar .btn:hover { background: var(--dou-ok); color: var(--dou-bg); }
+/* 空态禁用：未打开文件时保存降为中性色，避免空编辑器出现可点击主操作 */
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.editorbar .btn:disabled { background: var(--dou-panel-alt); border-color: var(--dou-border-strong); color: var(--dou-dim); }
+
+.auditlist { overflow-y: auto; padding: 6px 10px; font-size: var(--dou-fs-sm); font-family: var(--dou-font-mono); flex: 1; }
+.audititem { padding: 3px 0; border-bottom: 1px solid var(--dou-border); white-space: pre-wrap; word-break: break-all; }
+.mini-btn {
+  float: right;
+  font-size: var(--dou-fs-xs);
+  padding: 4px 10px;
+  min-height: 28px;
+  border: 1px solid var(--dou-border-strong);
+  border-radius: var(--dou-radius-sm);
+  background: var(--dou-panel);
+  color: var(--dou-text);
+  cursor: pointer;
+  font-family: inherit;
+}
+.mini-btn:hover { border-color: var(--dou-accent); color: var(--dou-accent-strong); }
+
+.fileopts {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: var(--dou-fs-xs);
+  color: var(--dou-dim);
+  border-bottom: 1px solid var(--dou-border);
+  background: var(--dou-panel-alt);
+  flex-wrap: wrap;
+}
+.filter {
+  padding: 6px 10px;
+  min-height: 32px;
+  border: 1px solid var(--dou-border);
+  border-radius: var(--dou-radius-sm);
+  font-size: var(--dou-fs-sm);
+  background: var(--dou-bg);
+  color: var(--dou-text);
+}
+.tabfilter { width: 110px; }
+.tabcheck { accent-color: var(--dou-accent); }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  margin-left: auto;
+  background: var(--dou-danger);
+  color: var(--dou-bg);
+  border-radius: 999px;
+  font-size: var(--dou-fs-xs);
+  font-weight: 700;
+  padding: 1px 7px;
+}
+
+/* ---------- 页面容器 ---------- */
+.panel-page { height: 100%; overflow-y: auto; padding: 0; flex: 1; min-height: 0; }
+.wizard, .approve-card, .issued { padding: 14px 18px; }
+.steps { font-size: var(--dou-fs-sm); color: var(--dou-text); line-height: 1.9; margin: 0 0 14px; }
+.row { display: flex; gap: 12px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+.row label { font-size: var(--dou-fs-body); color: var(--dou-text); }
+
+.snippet {
+  background: var(--dou-panel-alt);
+  border: 1px solid var(--dou-border);
+  color: var(--dou-accent-strong);
+  padding: 12px;
+  border-radius: var(--dou-radius-md);
+  font-size: var(--dou-fs-sm);
+  font-family: var(--dou-font-mono);
+  overflow-x: auto;
+  white-space: pre;
+}
+.mono { font-family: var(--dou-font-mono); font-size: var(--dou-fs-sm); }
+.empty { padding: 28px 18px; color: var(--dou-dim); font-size: var(--dou-fs-body); }
+
+.approve-card { border-bottom: 1px solid var(--dou-border); }
+.approve-card .cmd { margin-bottom: 6px; }
+.approve-actions { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.approve-actions .filter { flex: 1; min-width: 200px; }
+
+.scope-table { width: 100%; border-collapse: collapse; font-size: var(--dou-fs-sm); }
+.scope-table th, .scope-table td { border-bottom: 1px solid var(--dou-border); padding: 8px 12px; text-align: left; }
+.scope-table th { color: var(--dou-dim); font-weight: 700; }
+
+.issued {
+  background: var(--dou-ok-bg);
+  border: 1px solid var(--dou-ok);
+  border-radius: var(--dou-radius-md);
+  margin: 12px 18px;
+  color: var(--dou-ok-text);
+}
+
+/* ---------- 表单件 ---------- */
+select {
+  padding: 6px 10px;
+  min-height: 32px;
+  border: 1px solid var(--dou-border);
+  border-radius: var(--dou-radius-sm);
+  font-size: var(--dou-fs-sm);
+  background: var(--dou-bg);
+  color: var(--dou-text);
+  font-family: inherit;
+}
+select option { background: var(--dou-panel); color: var(--dou-text); }
+input[type="text"], input[type="password"] { font-family: var(--dou-font-mono); }
+/* 拆分前 select 规则受 scoped 限制不会命中 Monaco 内部 DOM，全局化后需显式排除 */
+.monaco-editor select { padding: 0; border: none; border-radius: 0; font-size: inherit; background: transparent; }
+
+/* ---------- 按钮 ---------- */
+.btn {
+  width: 100%;
+  min-height: var(--dou-touch);
+  padding: 8px 14px;
+  border: 1px solid var(--dou-border-strong);
+  background: var(--dou-panel-alt);
+  color: var(--dou-text);
+  border-radius: var(--dou-radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--dou-fs-body);
+  transition: border-color var(--dou-dur-fast), background var(--dou-dur-fast), color var(--dou-dur-fast);
+}
+.btn:hover { border-color: var(--dou-accent); color: var(--dou-accent-strong); }
+/* 宽度自适应变体：行内动作（原 .btn.ok / .btn.bad 即行内按钮） */
+.btn.ok, .btn.bad { width: auto; }
+.btn.ok { background: var(--dou-ok-bg); color: var(--dou-ok-text); border-color: var(--dou-ok); }
+.btn.ok:hover { background: var(--dou-ok); color: var(--dou-bg); }
+.btn.bad { background: var(--dou-danger-bg); color: var(--dou-danger-text); border-color: var(--dou-danger); }
+.btn.bad:hover { background: var(--dou-danger); color: var(--dou-bg); }
+
+/* ---------- 统一错误态（fail-closed / 401 / 429 / 网关离线） ---------- */
+.gw-error {
+  position: fixed;
+  top: 12px;
+  left: 222px;
+  right: 22px;
+  z-index: 30;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--dou-danger-bg);
+  border: 1px solid var(--dou-danger);
+  border-radius: var(--dou-radius-md);
+  font-size: var(--dou-fs-sm);
+  color: var(--dou-danger-text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+.gw-error-msg { flex: 1; }
+.gw-error .mini-btn { float: none; }
+
+/* ---------- 靶机离线优雅降级 ---------- */
+.ssh-offline {
+  position: absolute;
+  inset: 0;
+  background: var(--dou-bg);
+  color: var(--dou-text);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: center;
+  z-index: 5;
+  font-size: var(--dou-fs-body);
+}
+.ssh-offline .ssh-title { font-size: var(--dou-fs-lg); font-weight: 700; color: var(--dou-danger-text); }
+.ssh-offline .ssh-reason { color: var(--dou-warn-text); line-height: 1.7; }
+.ssh-offline .ssh-hint { color: var(--dou-dim); line-height: 1.8; }
+.ssh-offline .btn.ok { align-self: flex-start; }
+
+.ssh-offline-files {
+  padding: 14px 14px;
+  background: var(--dou-warn-bg);
+  border-bottom: 1px solid var(--dou-warn);
+  font-size: var(--dou-fs-sm);
+  line-height: 1.7;
+  color: var(--dou-warn-text);
+}
+.ssh-offline-files .ssh-title { font-size: var(--dou-fs-body); font-weight: 700; color: var(--dou-warn-text); margin-bottom: 4px; }
+.ssh-offline-files .hint { color: var(--dou-warn-text); line-height: 1.7; }
+.ssh-offline-files .btn.ok { margin-top: 10px; }
+.file-empty { padding: 18px 14px; color: var(--dou-dim); font-size: var(--dou-fs-sm); }
+
+/* ---------- 传输队列 / 保险库 / 主机密钥 ---------- */
+.tq-card { border-bottom: 1px solid var(--dou-border); padding: 12px 18px; }
+.tq-bar { height: 8px; background: var(--dou-border); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.tq-fill { height: 100%; background: var(--dou-ok); transition: width var(--dou-dur-normal); }
+.tq-actions { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.tq-err { color: var(--dou-danger-text); font-size: var(--dou-fs-xs); }
+
+/* ---------- 语义辅助类（替代散落的内联色值） ---------- */
+.ok-text { color: var(--dou-ok-text); font-weight: 700; }
+.warn-text { color: var(--dou-warn-text); }
+
+/* ---------- 960px 降级：单列堆叠 ---------- */
+@media (max-width: 960px) {
+  .sidebar { width: 160px; padding: 12px 8px; }
+  .brand { font-size: var(--dou-fs-lg); }
+  .nav-item { min-height: 40px; padding: 4px 8px; }
+  .grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr);
+    overflow-y: auto;
+  }
+  .panel-files { grid-row: auto; }
+  .gw-error { left: 12px; right: 12px; }
+}

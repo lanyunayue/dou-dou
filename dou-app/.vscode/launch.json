@@ -1,0 +1,29 @@
+{
+  // 调试 Rust 后端需要 C/C++ 扩展 (ms-vscode.cpptools) 的 cppvsdbg，
+  // 它复用已安装的 Visual Studio 调试引擎。
+  // 若用 CodeLLDB，请把 type 改成 "lldb"。
+  // 产物路径跟随 CARGO_TARGET_DIR（本机为 D:\dou-target），不再假设 src-tauri/target。
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "调试 dou.exe (MSVC)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${env:CARGO_TARGET_DIR}/debug/app.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/src-tauri",
+      "environment": [
+        { "name": "RUST_BACKTRACE", "value": "1" }
+      ],
+      "console": "integratedTerminal",
+      "preLaunchTask": "cargo build (Rust 后端)"
+    },
+    {
+      "name": "附加到运行中的 dou",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    }
+  ]
+}
