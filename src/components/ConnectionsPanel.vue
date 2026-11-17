@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { SSH_KEY } from '../core/useSsh'
 import { sshError } from '../core/useSsh'
 import { notify, askConfirm } from '../shared/feedback'
+import { filterTargets } from '../shared/filterTargets'
 import { connectByTarget, type ArchiveTarget } from '../core/useTerminal'
 import { navigateTo } from '../core/useNav'
 import { useRequestGuard } from '../core/useRequestGuard'
@@ -29,6 +30,9 @@ interface VaultKeyInfo { algorithm: string; fingerprint: string }
 const shell = ref<'loading' | 'empty' | 'error' | 'ready'>('loading')
 const errorText = ref('')
 const targets = ref<VaultTarget[]>([])
+// R16：列表按名称/主机/用户名过滤
+const query = ref('')
+const visibleTargets = computed(() => filterTargets(targets.value, query.value))
 const hostKeys = ref<any[]>([])
 const unlocked = ref(false)
 const unlisteners: UnlistenFn[] = []
@@ -206,8 +210,15 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
         <span class="hint">{{ quickAuth === 'password' ? '密码模式：目标只存地址，密码不入库，连接时输入（仅驻留内存）' : '密钥模式：私钥加密入库，明文只在内存解密' }}</span>
       </div>
 
+      <!-- R16：档案过滤（名称 / 主机 / 用户，不区分大小写） -->
+      <div class="row" role="search">
+        <input v-model="query" class="filter" placeholder="过滤档案：名称 / 主机 / 用户"
+               aria-label="过滤连接档案" />
+        <span v-if="query && visibleTargets.length === 0" class="hint warn-text">无匹配「{{ query }}」的档案</span>
+      </div>
+
       <!-- R8：双击卡片 = 一键连接主路径；主操作按钮与双击等价 -->
-      <div v-for="t in targets" :key="t.name" class="approve-card clickable"
+      <div v-for="t in visibleTargets" :key="t.name" class="approve-card clickable"
            :title="`双击卡片一键连接 ${t.name}`"
            @dblclick="onCardDblClick(t)">
         <div class="mono conn-line">
