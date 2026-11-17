@@ -1,3 +1,7 @@
+// C1 巡检解析层：纯解析 + 单测已落地；exec 采集与前端面板接线待真实靶机就绪后接入，
+// 暂未被 lib 调用，先保留避免 clippy dead_code 噪音。
+#[allow(dead_code)]
+mod inspect;
 mod monitor;
 mod pty;
 mod sftp;

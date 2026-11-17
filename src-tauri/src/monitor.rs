@@ -173,7 +173,6 @@ fn parse_sample(text: &str) -> Result<(HostStats, u64, u64), String> {
     for line in lines.by_ref() {
         if let Some((k, v)) = line.split_once(':') {
             let v: u64 = v
-                .trim()
                 .split_whitespace()
                 .next()
                 .and_then(|x| x.parse().ok())
