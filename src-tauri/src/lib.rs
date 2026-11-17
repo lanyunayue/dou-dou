@@ -390,7 +390,15 @@ pub fn run() {
         .manage(PtyState::default())
         .manage(Arc::new(TransferQueue::default()))
         .manage(VaultState::default())
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            // 暗色主题放运行时而非 tauri.conf.json：CLI 2.12.x 内置 schema 对
+            // windows[].theme（Option<Enum>）校验误报 anyOf，会拒绝 dev/build 启动。
+            use tauri::Manager;
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_theme(Some(tauri::Theme::Dark));
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 关窗改成隐藏，不断 SSH 连接
