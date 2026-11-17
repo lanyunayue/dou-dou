@@ -1,0 +1,15 @@
+# 本机构建配置（Windows + MinGW / w64devkit）
+#
+# 为什么 target-dir 在项目外：MinGW 的 dlltool 按 ANSI 代码页解释路径，
+# 含中文的项目路径会变成乱码导致 "Can't create .lib file"。放到纯 ASCII
+# 路径即可绕开。所有产物统一落 D 盘，避免占用 C 盘（本机 C 盘余量偏紧）。
+#
+# 换机时只需改下面两个绝对路径，或设置环境变量 CARGO_TARGET_DIR /
+# DOU_MINGW_BIN 覆盖；不要再写死任何用户名。
+
+[build]
+target-dir = "D:/dou-target"
+
+[target.x86_64-pc-windows-gnu]
+linker = "D:/w64devkit/bin/x86_64-w64-mingw32-gcc.exe"
+ar = "D:/w64devkit/bin/ar.exe"

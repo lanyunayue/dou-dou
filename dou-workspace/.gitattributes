@@ -1,0 +1,29 @@
+# 统一文本换行与编码；Windows 脚本保留 CRLF
+* text=auto eol=lf
+
+*.rs        text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.mermaid   text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.py        text eol=lf
+*.ts        text eol=lf
+*.vue       text eol=lf
+*.js        text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.ps1       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.icns binary
+*.svg  text eol=lf
+
+# 锁文件按文本管理，保证可 diff
+Cargo.lock          text eol=lf
+package-lock.json   text eol=lf

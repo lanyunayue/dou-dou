@@ -1,0 +1,263 @@
+%% 02 · 豆 Dou 统一数据结构与接口类图
+%% 来源：docs/handover/02-系统架构设计与任务分解.md §5.1
+%% 性质：抽取件，内容以主文档为准。只含签名与结构，不含实现代码。
+%% 图例：<<interface>> = trait / 接口；<<enumeration>> = 枚举。
+classDiagram
+    direction TB
+
+    class Config {
+        +bind: String
+        +dev: bool
+        +data_dir: PathBuf
+        +protocol_version: &'static str
+        +db_path() PathBuf
+        +from_env() Result~Config, ConfigError~
+    }
+    note for Config "dev 默认 false（P0-02）；protocol_version = 2025-06-18"
+
+    class AppState {
+        +token: Arc~MasterToken~
+        +config: Arc~Config~
+        +db: Arc~DbPool~
+        +audit: Arc~AuditWriter~
+        +sanitizer: Arc~Sanitizer~
+        +sessions: Arc~Mutex~HashMap~SessionId, SshConnection~~~
+        +cache: Arc~StateCache~
+        +new(cfg: Config) Result~AppState, InitError~
+    }
+    note for AppState "替代 main.rs:38-50 的 8 字段平铺；sessions 为运行时句柄，不落库（D5）"
+
+    class MasterToken {
+        +verify(presented: &str) bool
+        +masked() String
+    }
+    class DbPool {
+        +conn() Result~Connection, DbError~
+        +migrate() Result~(), DbError~
+        +with_tx~T~(f: FnOnce~Transaction~ -> Result~T~) Result~T, DbError~
+    }
+    note for DbPool "SQLite 唯一访问归口：仅此类型可调用 Connection::open（B6 收口）"
+
+    class StateCache {
+        +task(id: TaskId) Option~Task~
+        +lease(sid: SessionId) Option~Lease~
+        +quota(cred: CredId) QuotaCounter
+        +invalidate(kind: CacheKey)
+    }
+    note for StateCache "读缓存；所有写穿 DbPool，进程重启从库恢复"
+
+    class Task {
+        +id: TaskId
+        +session_id: SessionId
+        +command: String
+        +status: TaskStatus
+        +reason: String
+        +approver_note: String
+        +remember: bool
+        +policy: PolicyTier
+        +stdout: String
+        +stderr: String
+        +exit_code: Option~i32~
+        +created_ms: i64
+        +decided_ms: Option~i64~
+        +done_ms: Option~i64~
+        +client_disconnected: bool
+    }
+    class TaskStatus {
+        <<enumeration>>
+        PendingApproval
+        Approved
+        Rejected
+        Running
+        Done
+        Failed
+    }
+    class Lease {
+        +session_id: SessionId
+        +started_ms: i64
+        +expires_ms: i64
+        +is_expired(now_ms: i64) bool
+    }
+    class QuotaCounter {
+        +cred_id: CredId
+        +calls_used: u64
+        +active: u32
+        +updated_ms: i64
+    }
+    class SessionMeta {
+        +id: SessionId
+        +host_id: Option~HostId~
+        +source: Source
+        +status: SessionStatus
+        +started_ms: i64
+        +ended_ms: Option~i64~
+        +lease_started_ms: i64
+    }
+    class Credential {
+        +id: CredId
+        +token_hash: String
+        +salt: String
+        +hash_alg: HashAlg
+        +tier: PolicyTier
+        +scope: Scope
+        +expires_ms: i64
+        +revoked_ms: Option~i64~
+        +created_ms: i64
+    }
+    class Scope {
+        +client_id: String
+        +hosts: Vec~String~
+        +tools: Vec~String~
+        +paths: Vec~String~
+        +command_patterns: Vec~String~
+        +approval_policy: PolicyTier
+        +quota: Quota
+    }
+    class Quota {
+        +ttl_sec: u64
+        +max_calls: u64
+        +concurrency: u32
+    }
+    class HostKeyChallenge {
+        +addr: String
+        +old_key: String
+        +new_key: String
+        +state: ChallengeState
+        +created_ms: i64
+    }
+    class QuarantineFile {
+        +id: QuarantineId
+        +session_id: SessionId
+        +remote_path: String
+        +local_path: String
+        +sha256: String
+        +size: u64
+        +scan_engine: String
+        +scan_disposition: Disposition
+        +state: QuarantineState
+        +created_ms: i64
+    }
+
+    class Principal {
+        <<enumeration>>
+        Master
+        Device
+    }
+    class AuthContext {
+        +principal: Principal
+        +credential: Option~Credential~
+        +scope: Option~Scope~
+        +trace_id: String
+        +is_master() bool
+    }
+    class AuthMiddleware {
+        <<interface>>
+        +require_auth(state, req, next) Result~Response, StatusCode~
+        +exempt_paths() &'static [&'static str]
+    }
+    note for AuthMiddleware "axum::middleware::from_fn_with_state 单层；EXEMPT_PATHS 仅 /health（待 Q4）"
+
+    class PolicyEngine {
+        <<interface>>
+        +classify(cmd: &str, tier: PolicyTier) Decision
+        +reload_rules() Result~(), PolicyError~
+    }
+    class Decision {
+        +verdict: Verdict
+        +reason: String
+        +segment: String
+        +rule_id: Option~String~
+        +explanation: String
+    }
+    class ToolSpec {
+        +name: &'static str
+        +description: &'static str
+        +input_schema: Value
+        +handler: ToolHandler
+    }
+    class ToolRegistry {
+        +list() Value
+        +call(st, name, args, ctx) Value
+        +specs() &'static [ToolSpec]
+    }
+    note for ToolRegistry "tool_contract 单一真源；list() 与 call() 同源，禁止漂移（B10）"
+
+    class AuditEvent {
+        +ts_ms: i64
+        +trace_id: String
+        +source: Source
+        +action: AuditAction
+        +target: String
+        +verdict: VerdictLabel
+        +detail: Value
+        +prev_hash: String
+        +hash: String
+    }
+    class AuditWriter {
+        <<interface>>
+        +write(event: AuditEvent) Result~(), AuditError~
+        +verify_chain() ChainResult
+        +tail(n) Vec~AuditEvent~
+        +query(filter) Vec~AuditEvent~
+    }
+    note for AuditWriter "JSONL 链式 + SQLite 双写统一门面（收口 audit.rs:75-111 + 188-205）"
+
+    class Repository~T~ {
+        <<interface>>
+        +get(id) Result~Option~T~, DbError~
+        +upsert(entity: T) Result~(), DbError~
+        +list(filter) Result~Vec~T~, DbError~
+    }
+    class SshConnection {
+        +exec(cmd, timeout) Result~ExecOutcome, String~
+        +remote_read(...) Result~FileOutcome, String~
+        +remote_put(...) Result~(usize, String), String~
+        +remote_get(...) Result~(Vec~u8~, String), String~
+    }
+    class Sanitizer {
+        +sanitize(text: &str) String
+    }
+    class Crypto {
+        <<interface>>
+        +random_bytes(n: usize) Result~Vec~u8~~, CryptoError~
+        +hash_token(plain, salt) String
+        +derive_key(passphrase, salt) Result~Key, CryptoError~
+        +encrypt(plain, key) Result~Ciphertext, CryptoError~
+        +decrypt(ct, key) Result~Vec~u8~~, CryptoError~
+    }
+
+    AppState *-- Config
+    AppState *-- MasterToken
+    AppState *-- DbPool
+    AppState *-- AuditWriter
+    AppState *-- Sanitizer
+    AppState *-- StateCache
+    AppState o-- SshConnection : sessions 运行时句柄
+    StateCache o-- Task
+    StateCache o-- Lease
+    StateCache o-- QuotaCounter
+    Task --> TaskStatus
+    Credential *-- Scope
+    Scope *-- Quota
+    DbPool ..|> Repository~T~ : 由 repositories 实现
+    Repository~T~ ..> Task
+    Repository~T~ ..> Lease
+    Repository~T~ ..> QuotaCounter
+    Repository~T~ ..> SessionMeta
+    Repository~T~ ..> Credential
+    Repository~T~ ..> QuarantineFile
+    Repository~T~ ..> HostKeyChallenge
+    AuditWriter ..> AuditEvent
+    AuditWriter --> DbPool : 双写
+    AuthMiddleware ..> AuthContext : 注入 extensions
+    AuthContext --> Credential
+    AuthContext --> Scope
+    PolicyEngine ..> Decision
+    ToolRegistry *-- ToolSpec
+    ToolRegistry --> PolicyEngine
+    ToolRegistry --> AuditWriter
+    ToolRegistry --> SshConnection
+    ToolRegistry --> Sanitizer
+    ToolRegistry --> Crypto
+    Crypto ..> Credential : hash_token
+    Crypto ..> QuarantineFile : sha256

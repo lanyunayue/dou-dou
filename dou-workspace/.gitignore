@@ -1,0 +1,49 @@
+# ---- Rust 构建产物 ----
+target/
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.exp
+
+# ---- 前端依赖与产物 ----
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# ---- 凭据与运行时数据：绝不入库 ----
+token.txt
+audit.jsonl
+audit.db
+audit.db-*
+audit.sqlite*
+known_hosts.json
+sanitize_rules.json
+quarantine/
+keys/
+*.bak
+*.bak.*
+*_token.txt
+
+# ---- 本机工具链 / IDE / 工作区数据 ----
+.vscode/
+.idea/
+.workbuddy/
+*.user
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 日志与临时文件 ----
+*.log
+*.tmp
+*.swp
+~$*
+
+# 脚本临时输出目录
+tools/.contract/
+
+# 交接用 git 历史打包，非源码，不入库
+history.bundle

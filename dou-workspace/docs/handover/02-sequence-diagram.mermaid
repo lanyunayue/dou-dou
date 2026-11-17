@@ -1,0 +1,52 @@
+%% 02 · 豆 Dou 核心调用时序图（主链路：Agent tools/call → 鉴权 → 策略 → 审批/执行 → 审计落盘）
+%% 来源：docs/handover/02-系统架构设计与任务分解.md §6.1
+%% 另两张时序图见主文档：§6.2 dou.put 隔离区闭环、§6.3 桌面壳启动/探活/状态灯（按 Q4 推荐方案 A 绘制）。
+%% 性质：抽取件，内容以主文档为准；只描述调用序列与分支，不含实现代码。
+sequenceDiagram
+    autonumber
+    actor AG as Agent 客户端
+    participant L as auth/middleware<br/>require_auth
+    participant R as http/router + commands/mcp
+    participant TR as ToolRegistry<br/>(tool_contract)
+    participant PE as PolicyEngine + PathGuard
+    participant AP as commands/approval<br/>TaskHub + Repository~Task~
+    participant ADP as adapters<br/>DbPool / SshConnection / Sanitizer
+    participant AW as events/AuditWriter
+
+    AG->>L: POST /mcp · Bearer · tools/call(dou.exec, args)
+    alt 令牌无效 / 缺失 / 已吊销 / 已过期
+        L->>AW: write(auth_deny, verdict=denied)
+        L-->>AG: 401 · JSON-RPC -32001
+        Note over L,AG: fail-closed：不降级、不回退到 dev 兜底
+    else 校验通过（Master 或 Device）
+        L->>ADP: Repository~Credential~.get_by_hash(salt||plain)
+        ADP-->>L: Credential + Scope
+        L->>R: req.extensions.insert(AuthContext)
+        R->>TR: call(name, args, &AuthContext)
+        TR->>ADP: 作用域 tool_allowed / path_allowed / quota 检查
+        alt 越权 / 超配额 / 租约过期
+            TR->>AW: write(scope_deny / quota_calls / lease_expired)
+            TR-->>AG: isError=true（稳定文本）
+        else 允许
+            TR->>PE: PathGuard.normalize_and_check(命令内路径) + classify(cmd, tier)
+            PE-->>TR: Decision{verdict, rule_id, explanation}
+            TR->>AW: write(exec, verdict=auto/pending/blocked)
+
+            alt Verdict::Blocked
+                TR-->>AG: {status:"blocked", reason, hint}
+            alt Verdict::Pending（变更档）
+                TR->>AP: create_pending(...) → INSERT task 表
+                AP-->>TR: task_id
+                TR-->>AG: {status:"pending_approval", task_id}
+                Note over AG,AP: 人工在 P-03 审批台 POST /approve（M-only）；<br/>批准后后台执行、5min 未决自动拒绝并写审计
+            else Verdict::Auto
+                TR->>ADP: SshConnection.exec(cmd, timeout)
+                ADP-->>TR: ExecOutcome{stdout, stderr, exit_code, timed_out}
+                TR->>ADP: Sanitizer.sanitize(stdout/stderr)
+                TR->>ADP: snapshot.record(...) → snapshot 表（ON CONFLICT）
+                TR->>AW: write(exec_result, verdict=done)
+                TR-->>AG: {status:"executed_remote", 脱敏输出, snapshot}
+            end
+        end
+    end
+    AW->>ADP: 双写 audit.jsonl(链式哈希) + audit 表（经 DbPool）

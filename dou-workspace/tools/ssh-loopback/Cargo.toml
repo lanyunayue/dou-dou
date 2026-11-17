@@ -1,0 +1,27 @@
+[package]
+name = "dou-ssh-loopback"
+version = "0.1.0"
+edition = "2021"
+description = "本地回环 SSH 服务 + 自校验：在无外部 Linux 靶机时，验证豆 Dou 的受治理远程操作主线（主机密钥 TOFU + 公钥认证 + 传输队列/续传/同步）。"
+
+[lib]
+name = "dou_ssh_loopback"
+path = "src/server_lib.rs"
+
+[[bin]]
+name = "dou-ssh-server"
+path = "src/server.rs"
+
+[[bin]]
+name = "dou-ssh-selfcheck"
+path = "src/selfcheck.rs"
+
+[dependencies]
+russh = { version = "0.65", default-features = false, features = ["ring"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.10"
+
+# 独立 workspace：避免被上层 dou-workspace/Cargo.toml 的 workspace 自动吸收。
+[workspace]
