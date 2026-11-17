@@ -241,4 +241,86 @@ mod tests {
         assert_eq!(s.approval_policy, "observe");
         assert!(!s.tools.iter().any(|t| t == "exec"));
     }
+
+    #[test]
+    fn default_scope_three_tiers() {
+        let ex = default_scope("execute", "c1");
+        assert!(ex.tools.contains(&"exec".into()));
+        assert!(ex.tools.contains(&"upload".into()));
+        assert_eq!(ex.approval_policy, "execute");
+
+        let ch = default_scope("change", "c1");
+        assert!(ch.tools.contains(&"write".into()));
+        assert_eq!(ch.approval_policy, "change");
+
+        // 未知档位回落 observe（最小权限）
+        let ob = default_scope("unknown-tier", "c1");
+        assert_eq!(ob.approval_policy, "observe");
+        assert!(!ob.tools.iter().any(|t| t == "exec"));
+
+        // 三档配额一致：1 天 / 200 次 / 并发 1
+        for s in [ex, ch, ob] {
+            assert_eq!(s.quota.ttl_sec, 86400);
+            assert_eq!(s.quota.max_calls, 200);
+            assert_eq!(s.quota.concurrency, 1);
+            assert!(s.hosts.is_empty());
+        }
+    }
+
+    #[test]
+    fn tool_allowed_exact_and_wildcard() {
+        let s = Scope {
+            client_id: "c".into(),
+            hosts: vec![],
+            tools: vec!["exec".into(), "read_file".into()],
+            paths: vec![],
+            command_patterns: vec![],
+            approval_policy: "observe".into(),
+            quota: Quota { ttl_sec: 1, max_calls: 1, concurrency: 1 },
+        };
+        assert!(tool_allowed(&s, "exec"));
+        assert!(!tool_allowed(&s, "write"));
+
+        let wild = Scope { tools: vec!["*".into()], ..s };
+        assert!(tool_allowed(&wild, "write"));
+        assert!(tool_allowed(&wild, "anything"));
+    }
+
+    #[test]
+    fn path_allowed_prefix_and_wildcard() {
+        let s = Scope {
+            client_id: "c".into(),
+            hosts: vec![],
+            tools: vec![],
+            paths: vec!["~/projects".into()],
+            command_patterns: vec![],
+            approval_policy: "observe".into(),
+            quota: Quota { ttl_sec: 1, max_calls: 1, concurrency: 1 },
+        };
+        assert!(path_allowed(&s, "~/projects/a.txt"));
+        assert!(!path_allowed(&s, "/etc/passwd"));
+
+        // 路径根带尾斜杠时应归一
+        let trailing = Scope { paths: vec!["~/projects/".into()], ..s.clone() };
+        assert!(path_allowed(&trailing, "~/projects/x"));
+
+        let wild = Scope { paths: vec!["*".into()], ..s };
+        assert!(path_allowed(&wild, "/anything/at/all"));
+    }
+
+    #[test]
+    fn path_prefix_is_currently_string_prefix() {
+        // 记录当前行为：纯字符串 starts_with，`~/projects-evil` 也会命中
+        // `~/projects`。真实路径规范化/目录边界收紧属 B3 后续，不在本次改动范围。
+        let s = Scope {
+            client_id: "c".into(),
+            hosts: vec![],
+            tools: vec![],
+            paths: vec!["~/projects".into()],
+            command_patterns: vec![],
+            approval_policy: "observe".into(),
+            quota: Quota { ttl_sec: 1, max_calls: 1, concurrency: 1 },
+        };
+        assert!(path_allowed(&s, "~/projects-evil/../x"));
+    }
 }
