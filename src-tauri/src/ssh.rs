@@ -261,7 +261,13 @@ async fn ssh_connect_pubkey(
 
 /// 公共拨号：TCP + 算法协商 + 主机密钥校验（TOFU/变更拒绝在 `SshHandler` 内完成）。
 async fn ssh_dial(app: AppHandle, host: &str, port: u16) -> Result<DouHandle, String> {
-    let config = std::sync::Arc::new(client::Config::default());
+    // 会话保活默认全局开启（不做配置项）：NAT/防火墙会掐断空闲 TCP，
+    // 不发 keepalive 时用户闲置十几分钟后遭遇无解释断线。
+    // 每 30s 发一次；连续 3 次无应答判断线（keepalive_max 默认值），
+    // 会话以 KeepaliveTimeout 关闭，走前端既有人话断线文案。
+    let mut config = client::Config::default();
+    config.keepalive_interval = Some(std::time::Duration::from_secs(30));
+    let config = std::sync::Arc::new(config);
     client::connect(
         config,
         (host, port),
