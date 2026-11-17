@@ -286,15 +286,13 @@ fn open_local_conpty(app: AppHandle, state: &PtyState) -> Result<String, String>
         // resize 线程：持有 hpc，ResizePseudoConsole 同步 xterm 尺寸
         std::thread::spawn(move || {
             while let Some((cols, rows)) = resize_rx.blocking_recv() {
-                unsafe {
-                    let _ = ResizePseudoConsole(
-                        hpc,
-                        COORD {
-                            X: cols as i16,
-                            Y: rows as i16,
-                        },
-                    );
-                }
+                let _ = ResizePseudoConsole(
+                    hpc,
+                    COORD {
+                        X: cols as i16,
+                        Y: rows as i16,
+                    },
+                );
             }
         });
 
@@ -302,10 +300,8 @@ fn open_local_conpty(app: AppHandle, state: &PtyState) -> Result<String, String>
         let app_w = app.clone();
         let sid_w = sid.clone();
         std::thread::spawn(move || {
-            unsafe {
-                let _ = WaitForSingleObject(HANDLE(proc_raw as *mut core::ffi::c_void), INFINITE);
-                ClosePseudoConsole(hpc);
-            }
+            let _ = WaitForSingleObject(HANDLE(proc_raw as *mut core::ffi::c_void), INFINITE);
+            ClosePseudoConsole(hpc);
             let _ = app_w.emit("pty_exit", serde_json::json!({ "sid": sid_w }));
         });
 
