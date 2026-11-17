@@ -387,6 +387,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(PtyState::default())
         .manage(Arc::new(TransferQueue::default()))
         .manage(VaultState::default())

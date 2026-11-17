@@ -51,6 +51,14 @@
       <OfflineState v-if="sshError && !formVisible" variant="terminal" />
       <!-- R1 新建连接表单：无会话时常显，连接成功自动收起 -->
       <ConnectForm v-if="formVisible" />
+      <!-- R13 终端右键菜单：复制/粘贴/全选/清屏（与溢出菜单同一设计语言） -->
+      <div v-if="termCtxMenu.visible" class="term-ctx-mask" @click="termCtxClose" @contextmenu.prevent="termCtxClose"></div>
+      <div v-if="termCtxMenu.visible" class="term-ctx" :style="{ left: termCtxMenu.x + 'px', top: termCtxMenu.y + 'px' }">
+        <button type="button" @click="termCtxCopy">复制</button>
+        <button type="button" @click="termCtxPaste">粘贴</button>
+        <button type="button" @click="termCtxSelectAll">全选</button>
+        <button type="button" @click="termCtxClear">清屏</button>
+      </div>
     </div>
   </div>
 </template>
@@ -64,6 +72,7 @@ import {
   toggleConnectForm, openLocalTab, switchTab, closeTab, exportTerm, doBroadcast,
   selectedCount, showSessionFilter, tabs,
   lastSessions, restorableCount, restoringSessions, restoreEntryVisible, restoreLastSessions,
+  termCtxMenu, termCtxClose, termCtxCopy, termCtxPaste, termCtxSelectAll, termCtxClear,
 } from '../core/useTerminal'
 import { sshError } from '../core/useSsh'
 import { hostStats, monitorUnsupported } from '../core/useMonitor'
@@ -133,4 +142,31 @@ function fmtUptime(s: number) {
   border-bottom: 1px solid var(--dou-border);
 }
 .restore-btn { height: 24px; }
+/* R13 终端右键菜单：复用溢出菜单的设计语言（panel/border/radius/fs token 同源） */
+.term-ctx {
+  position: absolute;
+  z-index: 30;
+  min-width: 128px;
+  background: var(--dou-panel);
+  border: 1px solid var(--dou-border-strong);
+  border-radius: var(--dou-radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+.term-ctx button {
+  border: none;
+  background: none;
+  color: var(--dou-text);
+  font: inherit;
+  font-size: var(--dou-fs-xs);
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-radius: var(--dou-radius-sm);
+  white-space: nowrap;
+}
+.term-ctx button:hover { background: var(--dou-panel-alt); color: var(--dou-accent-strong); }
+.term-ctx-mask { position: fixed; inset: 0; z-index: 25; }
 </style>

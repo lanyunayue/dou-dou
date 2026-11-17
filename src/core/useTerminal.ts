@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { sendNotification } from '@tauri-apps/plugin-notification'
+import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -59,6 +60,43 @@ export const visibleTabs = computed(() => tabs.value.filter(t =>
 export const selectedCount = computed(() => tabs.value.filter(t => t.selected).length)
 export const showSessionFilter = computed(() => tabs.value.length >= 5)
 
+// R13 剪贴板：终端复制粘贴统一走官方插件（WebView2 的 navigator.clipboard.readText
+// 权限不可靠；读写失败静默——剪贴板故障不应向会话注入内容或打断终端）。
+async function copyTermSelection(term: Terminal) {
+  const sel = term.getSelection()
+  if (!sel) return
+  try { await writeText(sel) } catch { /* 剪贴板不可用时静默 */ }
+}
+// 粘贴去重锁：IME/合成键盘环境下 Ctrl+Shift+V 的 keydown 会被重复派发（实测连粘 2-5 次），
+// 150ms 内的重复粘贴调用直接丢弃（人手连按不可能快于此）。
+let lastPasteAt = 0
+async function pasteClipboardToTerm(term: Terminal) {
+  const now = Date.now()
+  if (now - lastPasteAt < 150) return
+  lastPasteAt = now
+  try {
+    const text = await readText()
+    if (text) { term.paste(text) }
+  } catch { /* 读取失败静默：权限或焦点问题 */ }
+}
+
+// R13 右键菜单状态：终端区右键弹出（复制/粘贴/全选/清屏），坐标相对 .term-wrap
+export const termCtxMenu = ref<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 })
+
+// 多标签共用同一终端挂载容器，contextmenu 按元素去重绑定一次即可覆盖全部会话；
+// 容器被重挂载（视图重建）时按新元素重新绑定。
+let ctxMenuBoundEl: HTMLElement | null = null
+function onTermContextMenu(ev: MouseEvent) {
+  ev.preventDefault()
+  const wrap = termEl.value?.parentElement
+  if (!wrap) return
+  const r = wrap.getBoundingClientRect()
+  // 菜单约 130×140，贴边时往回收，避免溢出面板
+  const x = Math.max(0, Math.min(ev.clientX - r.left, r.width - 130))
+  const y = Math.max(0, Math.min(ev.clientY - r.top, r.height - 140))
+  termCtxMenu.value = { visible: true, x, y }
+}
+
 // 每会话独立的 xterm 实例（fit 插件随标签保存，切换显示时按容器重排）
 function createTerm(): { term: Terminal; fit: FitAddon } {
   const term = new Terminal({ fontSize: 13, convertEol: true })
@@ -68,8 +106,38 @@ function createTerm(): { term: Terminal; fit: FitAddon } {
   try { fit.fit() } catch { /* 容器未就绪时跳过，切换标签时再 fit */ }
   // F-05：优先 WebGL，初始化失败自动回退 Canvas（渲染器回退，非连接错误）
   try { void term.loadAddon(new WebglAddon()) } catch { /* 回退默认 Canvas */ }
+  // R13 复制粘贴：Ctrl+Shift+C/V 接管；Ctrl+C 有选区时复制（无选区放行给 shell 的 SIGINT）；
+  // Ctrl+V 粘贴（原字面 ^V 按 Windows 终端惯例让位给粘贴）；选中即复制（MobaXterm/PuTTY 惯例）。
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== 'keydown') return true
+    const k = ev.key.toLowerCase()
+    if (ev.ctrlKey && ev.shiftKey && k === 'c') { void copyTermSelection(term); return false }
+    if (ev.ctrlKey && ev.shiftKey && k === 'v') {
+      void pasteClipboardToTerm(term); return false
+    }
+    if (ev.ctrlKey && !ev.shiftKey && k === 'c' && term.hasSelection()) { void copyTermSelection(term); return false }
+    if (ev.ctrlKey && !ev.shiftKey && k === 'v') { void pasteClipboardToTerm(term); return false }
+    return true
+  })
+  term.onSelectionChange(() => { void copyTermSelection(term) })
+  if (termEl.value && ctxMenuBoundEl !== termEl.value) {
+    termEl.value.addEventListener('contextmenu', onTermContextMenu)
+    ctxMenuBoundEl = termEl.value
+  }
   return { term, fit }
 }
+
+// R13 右键菜单动作：作用于当前活动会话，动作后关闭菜单
+function activeTerm(): Terminal | undefined {
+  return tabs.value.find(x => x.sid === activeSid.value)?.term
+}
+export function termCtxClose() {
+  termCtxMenu.value = { visible: false, x: 0, y: 0 }
+}
+export function termCtxCopy() { const t = activeTerm(); if (t) void copyTermSelection(t); termCtxClose() }
+export function termCtxPaste() { const t = activeTerm(); if (t) void pasteClipboardToTerm(t); termCtxClose() }
+export function termCtxSelectAll() { const t = activeTerm(); if (t) t.selectAll(); termCtxClose() }
+export function termCtxClear() { const t = activeTerm(); if (t) t.clear(); termCtxClose() }
 
 // 多标签共用一个挂载点：只显示当前会话，避免多个终端在同一容器里纵向堆叠
 function showActiveTerm() {

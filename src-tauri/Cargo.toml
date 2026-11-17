@@ -25,6 +25,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
+# R13 终端复制粘贴：系统剪贴板读写（WebView2 对 navigator.clipboard.readText 权限不可靠，走官方插件）
+tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
