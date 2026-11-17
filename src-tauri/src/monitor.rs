@@ -214,13 +214,7 @@ fn parse_sample(text: &str) -> Result<(HostStats, u64, u64), String> {
                 tx_total += nums[8];
                 has_net = true;
             }
-        } else if let Ok(u) = line
-            .trim()
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .parse::<f64>()
-        {
+        } else if let Ok(u) = line.split_whitespace().next().unwrap_or("").parse::<f64>() {
             uptime_s = u as u64;
         }
     }
