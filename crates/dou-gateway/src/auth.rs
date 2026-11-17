@@ -21,7 +21,7 @@ pub fn data_dir() -> PathBuf {
 
 /// CSPRNG 十六进制串。OS 随机源不可用则拒绝签发可预测凭据。
 pub fn rand_hex(len: usize) -> String {
-    let mut bytes = vec![0u8; (len + 1) / 2];
+    let mut bytes = vec![0u8; len.div_ceil(2)];
     getrandom::fill(&mut bytes).expect("CSPRNG 不可用：拒绝签发可预测凭据（fail-closed）");
     let s: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     s[..len].to_string()
@@ -60,7 +60,6 @@ pub fn check_token(presented: &str, expected: &str) -> bool {
 }
 
 /// 令牌解析已统一上移至 `authz::require_auth`（W-15，全仓唯一解析点）。
-
 /// 令牌掩码：日志与控制台只显示后 4 位，永不回吐完整凭据。
 pub fn mask_token(t: &str) -> String {
     let chars: Vec<char> = t.chars().collect();

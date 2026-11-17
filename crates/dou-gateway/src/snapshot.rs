@@ -4,7 +4,7 @@
 //!   1. 命令内容哈希
 //!   2. 参数规范化串哈希（去空白、排序后的参数）
 //!   3. 数据集路径哈希（命令中出现的路径参数）
-//! 三段拼接后再做一次 sha256，作为快照指纹；同一脚本换数据集视为不同实验。
+//!      三段拼接后再做一次 sha256，作为快照指纹；同一脚本换数据集视为不同实验。
 //!
 //! 被动采集：命令原文、工作目录、进程号、GPU 占用、日志尾部；不要求用户改脚本。
 
@@ -24,10 +24,9 @@ fn extract_dataset_path(cmd: &str) -> String {
     let tokens: Vec<&str> = cmd.split_whitespace().collect();
     tokens
         .iter()
-        .filter(|t| {
+        .rfind(|t| {
             t.starts_with('/') || t.starts_with("./") || t.starts_with("../") || t.contains('/')
         })
-        .last()
         .copied()
         .unwrap_or("")
         .to_string()

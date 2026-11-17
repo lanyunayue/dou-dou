@@ -182,6 +182,7 @@ impl TaskHub {
     }
 
     /// 完整版创建：携带审批卡片四要素（目标路径 / 历史次数 / 预计影响）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_pending_with(
         &self,
         session: &str,

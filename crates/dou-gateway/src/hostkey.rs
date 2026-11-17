@@ -51,18 +51,46 @@ impl KnownHosts {
                 map: HashMap::new(),
                 load_ok: true,
             },
-            Some(s) => match serde_json::from_str::<HashMap<String, String>>(&s) {
-                Ok(map) => Self {
-                    path,
-                    map,
-                    load_ok: true,
-                },
-                Err(_) => Self {
+            Some(s) => {
+                let trimmed = s.trim();
+                // 兼容两种落盘格式：
+                //   1) 网关原生：{ "host:port": "公钥全文" }
+                //   2) 客户端（Tauri）：[ { host, port, fingerprint, ... } ]
+                // 空文件 / 空数组视为尚无记录，不判损坏；只有既非对象又非数组才算解析失败。
+                if trimmed.is_empty() {
+                    return Self { path, map: HashMap::new(), load_ok: true };
+                }
+                if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(trimmed) {
+                    return Self { path, map, load_ok: true };
+                }
+                if let Ok(entries) =
+                    serde_json::from_str::<Vec<serde_json::Value>>(trimmed)
+                {
+                    let mut map = HashMap::new();
+                    for e in entries {
+                        let addr = e
+                            .get("host")
+                            .and_then(|v| v.as_str())
+                            .map(|h| match e.get("port").and_then(|p| p.as_u64()) {
+                                Some(p) => format!("{h}:{p}"),
+                                None => h.to_string(),
+                            });
+                        let key = e
+                            .get("fingerprint")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| e.get("host_key").and_then(|v| v.as_str()));
+                        if let (Some(addr), Some(key)) = (addr, key) {
+                            map.insert(addr, key.to_string());
+                        }
+                    }
+                    return Self { path, map, load_ok: true };
+                }
+                Self {
                     path,
                     map: HashMap::new(),
                     load_ok: false,
-                },
-            },
+                }
+            }
         }
     }
 
@@ -155,6 +183,36 @@ mod tests {
     fn forget_unknown_addr_returns_false() {
         let mut kh = KnownHosts::default();
         assert!(!kh.forget("ghost:22"));
+    }
+
+    #[test]
+    fn empty_array_is_not_corrupted() {
+        let dir = std::env::temp_dir().join("dou_kh_empty_array_test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("known_hosts.json");
+        fs::write(&p, "[]").unwrap();
+        let kh = KnownHosts::load(p.clone());
+        assert!(kh.load_ok, "空数组不应判为损坏");
+        assert!(kh.map.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn client_array_format_loads_entries() {
+        let dir = std::env::temp_dir().join("dou_kh_array_test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("known_hosts.json");
+        fs::write(
+            &p,
+            r#"[{"host":"example.test","port":22,"fingerprint":"SHA256:abc","first_seen":1,"last_seen":1}]"#,
+        )
+        .unwrap();
+        let kh = KnownHosts::load(p.clone());
+        assert!(kh.load_ok);
+        assert_eq!(kh.map.get("example.test:22"), Some(&"SHA256:abc".to_string()));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

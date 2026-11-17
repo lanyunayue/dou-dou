@@ -46,7 +46,7 @@ pub fn init_chain(path: &Path) {
     let Ok(text) = std::fs::read_to_string(path) else {
         return;
     };
-    let last = text.lines().filter(|l| !l.is_empty()).last().unwrap_or("");
+    let last = text.lines().rfind(|l| !l.is_empty()).unwrap_or("");
     let mut guard = LAST_HASH.lock().unwrap_or_else(|e| e.into_inner());
     *guard = serde_json::from_str::<Value>(last).ok().and_then(|v| {
         v.get("hash")
@@ -263,7 +263,6 @@ pub fn write_sqlite(entry: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
 
     /// 直接写原始 JSONL（不走 write()，避免测试期触碰真实 SQLite 审计表）。
     fn seed(path: &Path, rows: &[(&str, &str, &str)]) {

@@ -195,7 +195,7 @@ pub fn classify(cmd: &str) -> Decision {
     }
 
     let segs: Vec<&str> = normalized
-        .split(|c: char| c == ';' || c == '|' || c == '&')
+        .split([';', '|', '&'])
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect();

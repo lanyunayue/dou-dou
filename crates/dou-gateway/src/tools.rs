@@ -118,7 +118,7 @@ pub async fn call(
         {
             let mut q = st.quota.lock().await;
             let (calls, active) = q.entry(c.id.clone()).or_insert((0, 0));
-            if *calls >= sc.quota.max_calls as u64 {
+            if *calls >= sc.quota.max_calls {
                 audit::write(
                     &st.audit,
                     audit::event(
@@ -484,24 +484,34 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// 路径范围校验（计划书七维作用域之一）。
-/// 允许：/home/dou/、/tmp/、少数系统白名单文件；
-/// 拒绝：/etc/shadow、/etc/sudoers、.ssh 私钥、/root 等。
-fn check_remote_path(path: &str) -> Result<(), String> {
+/// 允许：当前会话的真实家目录、/tmp/、少数系统白名单文件；
+/// 拒绝：/etc/shadow、/etc/sudoers、.ssh 私钥、其他用户家目录等。
+///
+/// `home_dir` 为连接后经 SFTP REALPATH 解析出的远端真实家目录（解析失败时
+/// 回退为按用户名推断的 `/home/<user>` 或 `/root`）。不再写死内部靶机的 `dou` 用户。
+fn check_remote_path(path: &str, home_dir: Option<&str>) -> Result<(), String> {
     // B3 逃逸加固第一步：先做词法归一化，把 `..` / `.` / 重复斜杠折叠成真实路径，
     // 否则 `/home/dou/projects/../../etc/shadow` 会被纯字符串 contains 漏判。
     let normalized = normalize_remote_path(path)?;
 
+    // 会话真实家目录（已去尾斜杠）。
+    let home_root = home_dir
+        .filter(|h| !h.is_empty())
+        .map(|h| h.trim_end_matches('/').to_string());
+    // root 会话的家目录就是 /root；此时 /root 属于本人家目录，不再按敏感前缀拒绝。
+    let is_root_home = home_root.as_deref() == Some("/root");
+
     // 归一化后做敏感前缀拒绝（用 starts_with 而非 contains，避免误伤合法路径）。
-    let denied_prefix = [
+    let mut denied_prefix = vec![
         "/etc/shadow",
         "/etc/sudoers",
         "/etc/sudoers.d/",
-        "/root/",
-        "/root",
-        "/home/dou/.ssh/",
         "/proc/self/environ",
         "/proc/sys/",
     ];
+    if !is_root_home {
+        denied_prefix.extend(["/root/", "/root"]);
+    }
     for d in &denied_prefix {
         if normalized == *d || normalized.starts_with(&format!("{d}/")) || normalized.starts_with(d)
         {
@@ -517,14 +527,25 @@ fn check_remote_path(path: &str) -> Result<(), String> {
     {
         return Err(format!("私钥/授权文件禁止代理访问：{fname}"));
     }
+
+    let in_home = match &home_root {
+        // 家目录就是根 `/` 时，所有未被敏感前缀/私钥拦下的路径都在家目录内。
+        Some(home) if home == "/" => true,
+        Some(home) => normalized == *home || normalized.starts_with(&format!("{home}/")),
+        None => false,
+    };
     // 必须落在允许根下（归一化后比较）。
-    if !(normalized.starts_with("/home/dou/")
+    let allowed = in_home
         || normalized.starts_with("/tmp/")
         || normalized == "/etc/hostname"
         || normalized == "/etc/os-release"
-        || normalized == "/etc/passwd")
-    {
-        return Err(format!("路径 {path} 越出允许根（/home/dou/、/tmp/）"));
+        || normalized == "/etc/passwd";
+    if !allowed {
+        let root_hint = home_root
+            .as_deref()
+            .map(|h| format!("{h}、/tmp/"))
+            .unwrap_or("/tmp/".to_string());
+        return Err(format!("路径 {path} 越出允许根（{root_hint}）"));
     }
     Ok(())
 }
@@ -533,8 +554,8 @@ fn check_remote_path(path: &str) -> Result<(), String> {
 /// 词法归一化挡不住「合法路径下的 symlink 指向墙外」——`/home/dou/link` 词法
 /// 完全合法，但它可能指向 /etc/shadow。远端 canonicalize 求出真实路径后，
 /// 对真实路径重跑同一套 check_remote_path。
-fn check_resolved_remote_path(requested: &str, resolved: &str) -> Result<(), String> {
-    check_remote_path(resolved)
+fn check_resolved_remote_path(requested: &str, resolved: &str, home_dir: Option<&str>) -> Result<(), String> {
+    check_remote_path(resolved, home_dir)
         .map_err(|e| format!("symlink 解析后越界：{requested} → {resolved}：{e}"))
 }
 
@@ -556,7 +577,7 @@ async fn resolve_for_read(
     path: &str,
 ) -> Result<String, String> {
     let resolved = conn.remote_realpath(path).await?;
-    check_resolved_remote_path(path, &resolved)?;
+    check_resolved_remote_path(path, &resolved, Some(&conn.home_dir))?;
     Ok(resolved)
 }
 
@@ -577,7 +598,7 @@ async fn resolve_for_write(
     }
     match conn.remote_realpath(path).await {
         Ok(resolved) => {
-            check_resolved_remote_path(path, &resolved)?;
+            check_resolved_remote_path(path, &resolved, Some(&conn.home_dir))?;
             Ok(resolved)
         }
         Err(_) => {
@@ -585,7 +606,7 @@ async fn resolve_for_write(
             let parent =
                 lexical_parent(path).ok_or_else(|| format!("路径 {path} 无父目录，禁止写入"))?;
             let presolved = conn.remote_realpath(&parent).await?;
-            check_resolved_remote_path(path, &presolved)?;
+            check_resolved_remote_path(path, &presolved, Some(&conn.home_dir))?;
             Ok(path.to_string())
         }
     }
@@ -657,12 +678,6 @@ async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
             );
         }
     }
-    if let Err(e) = check_remote_path(path) {
-        return text_result(
-            &json!({"status":"path_scope_denied","message":e}).to_string(),
-            true,
-        );
-    }
     let mut map = st.sessions.lock().await;
     let conn = match map.get_mut(session_id) {
         Some(c) => c,
@@ -674,6 +689,12 @@ async fn read(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Valu
             )
         }
     };
+    if let Err(e) = check_remote_path(path, Some(&conn.home_dir)) {
+        return text_result(
+            &json!({"status":"path_scope_denied","message":e}).to_string(),
+            true,
+        );
+    }
     // B3：symlink 真实解析——词法合法 ≠ 真实合法，链接指向墙外即拒。
     let target = match resolve_for_read(conn, path).await {
         Ok(r) => r,
@@ -764,12 +785,6 @@ async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
             );
         }
     }
-    if let Err(e) = check_remote_path(remote) {
-        return text_result(
-            &json!({"status":"path_scope_denied","message":e}).to_string(),
-            true,
-        );
-    }
     let local = std::path::Path::new(local_ref);
     let bytes = match std::fs::read(local) {
         Ok(b) => b,
@@ -798,6 +813,12 @@ async fn put(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
             )
         }
     };
+    if let Err(e) = check_remote_path(remote, Some(&conn.home_dir)) {
+        return text_result(
+            &json!({"status":"path_scope_denied","message":e}).to_string(),
+            true,
+        );
+    }
     // B3：symlink 真实解析——目标是链接即拒（写穿链接=改写墙外文件）；
     // 目标不存在则父链 canonicalize 复检后才允许新建。
     let target = match resolve_for_write(conn, remote).await {
@@ -881,12 +902,6 @@ async fn get(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
             );
         }
     }
-    if let Err(e) = check_remote_path(remote) {
-        return text_result(
-            &json!({"status":"path_scope_denied","message":e}).to_string(),
-            true,
-        );
-    }
     let mut map = st.sessions.lock().await;
     let conn = match map.get_mut(session_id) {
         Some(c) => c,
@@ -898,6 +913,12 @@ async fn get(st: &AppState, args: &Value, scope: Option<&scope::Scope>) -> Value
             )
         }
     };
+    if let Err(e) = check_remote_path(remote, Some(&conn.home_dir)) {
+        return text_result(
+            &json!({"status":"path_scope_denied","message":e}).to_string(),
+            true,
+        );
+    }
     // B3：symlink 真实解析——同 read，链接指向墙外即拒。
     let target = match resolve_for_read(conn, remote).await {
         Ok(r) => r,
@@ -1110,21 +1131,45 @@ mod tests {
 
     #[test]
     fn check_path_blocks_dotdot_escape() {
+        let home = Some("/home/dou");
         // 归一化后落到 /etc/shadow，应被拒
-        assert!(check_remote_path("/home/dou/projects/../../../etc/shadow").is_err());
-        assert!(check_remote_path("/tmp/../../root/.ssh/id_rsa").is_err());
+        assert!(check_remote_path("/home/dou/projects/../../../etc/shadow", home).is_err());
+        assert!(check_remote_path("/tmp/../../root/.ssh/id_rsa", home).is_err());
         // 越出 /home/dou 允许根（归一化到 /home/etc），应被拒
-        assert!(check_remote_path("/home/dou/projects/../../etc/shadow").is_err());
+        assert!(check_remote_path("/home/dou/projects/../../etc/shadow", home).is_err());
         // 合法路径放行
-        assert!(check_remote_path("/home/dou/data/train.log").is_ok());
-        assert!(check_remote_path("/tmp/note.txt").is_ok());
+        assert!(check_remote_path("/home/dou/data/train.log", home).is_ok());
+        assert!(check_remote_path("/tmp/note.txt", home).is_ok());
+    }
+
+    #[test]
+    fn check_path_home_adapts_to_real_home() {
+        // 真实家目录 /home/demo 下放行
+        assert!(check_remote_path("/home/demo/readme.txt", Some("/home/demo")).is_ok());
+        // 家目录为 /home/dou 时访问 /home/demo 应被拒（跨目录）
+        assert!(check_remote_path("/home/demo/readme.txt", Some("/home/dou")).is_err());
+        // root 家目录 /root 放行（root 会话访问自己家目录不被敏感前缀误挡）
+        assert!(check_remote_path("/root/.config/app.conf", Some("/root")).is_ok());
+        // 家目录 /home/dou 访问 /root 应被拒
+        assert!(check_remote_path("/root/.config/app.conf", Some("/home/dou")).is_err());
+        // 受限 shell 家目录就是根 `/`：家目录内普通文件放行
+        assert!(check_remote_path("/readme.txt", Some("/")).is_ok());
+        assert!(check_remote_path("/pub/example/readme.txt", Some("/")).is_ok());
+        assert!(check_remote_path("/var/data/x", Some("/")).is_ok());
+        // 但敏感前缀、私钥即便在家目录（根）下仍拒绝
+        assert!(check_remote_path("/etc/shadow", Some("/")).is_err());
+        assert!(check_remote_path("/root/secret", Some("/")).is_err());
+        // 无家目录时只认 /tmp 与白名单
+        assert!(check_remote_path("/tmp/note.txt", None).is_ok());
+        assert!(check_remote_path("/home/dou/x", None).is_err());
     }
 
     #[test]
     fn check_path_blocks_private_keys_anywhere() {
-        assert!(check_remote_path("/tmp/id_rsa").is_err());
-        assert!(check_remote_path("/home/dou/.ssh/id_ed25519").is_err());
-        assert!(check_remote_path("/home/dou/data/authorized_keys").is_err());
+        let home = Some("/home/dou");
+        assert!(check_remote_path("/tmp/id_rsa", home).is_err());
+        assert!(check_remote_path("/home/dou/.ssh/id_ed25519", home).is_err());
+        assert!(check_remote_path("/home/dou/data/authorized_keys", home).is_err());
     }
 
     #[test]
@@ -1139,21 +1184,21 @@ mod tests {
     #[test]
     fn symlink_resolved_escape_is_blocked() {
         // 请求词法合法，但真实目标越界 → 拒
-        assert!(check_resolved_remote_path("/home/dou/link", "/etc/shadow").is_err());
-        assert!(check_resolved_remote_path("/home/dou/link", "/root/secret").is_err());
-        assert!(check_resolved_remote_path("/tmp/x", "/etc/sudoers").is_err());
+        assert!(check_resolved_remote_path("/home/dou/link", "/etc/shadow", Some("/home/dou")).is_err());
+        assert!(check_resolved_remote_path("/home/dou/link", "/root/secret", Some("/home/dou")).is_err());
+        assert!(check_resolved_remote_path("/tmp/x", "/etc/sudoers", Some("/home/dou")).is_err());
         // 真实目标是个私钥（无论落在哪）→ 拒
-        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/.ssh/id_ed25519").is_err());
+        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/.ssh/id_ed25519", Some("/home/dou")).is_err());
         // 允许根外的一般路径 → 拒
-        assert!(check_resolved_remote_path("/home/dou/link", "/var/data/x").is_err());
+        assert!(check_resolved_remote_path("/home/dou/link", "/var/data/x", Some("/home/dou")).is_err());
     }
 
     #[test]
     fn symlink_resolved_inside_root_is_allowed() {
-        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/data/train.log").is_ok());
-        assert!(check_resolved_remote_path("/tmp/x", "/tmp/note.txt").is_ok());
+        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/data/train.log", Some("/home/dou")).is_ok());
+        assert!(check_resolved_remote_path("/tmp/x", "/tmp/note.txt", Some("/home/dou")).is_ok());
         // 允许根内的白名单文件
-        assert!(check_resolved_remote_path("/home/dou/link", "/etc/os-release").is_ok());
+        assert!(check_resolved_remote_path("/home/dou/link", "/etc/os-release", Some("/home/dou")).is_ok());
     }
 
     #[test]
@@ -1163,7 +1208,7 @@ mod tests {
             Some("/home/dou/sub")
         );
         assert_eq!(lexical_parent("/file.txt").as_deref(), Some("/"));
-        assert_eq!(lexical_parent("/").is_none(), true);
+        assert!(lexical_parent("/").is_none());
         assert_eq!(lexical_parent("/tmp/dir/").as_deref(), Some("/tmp"));
     }
 }

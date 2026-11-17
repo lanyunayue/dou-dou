@@ -58,9 +58,16 @@ impl SshConnection {
     /// 对 symlink 链一路解析到最终目标；目标不存在时返回 Err。
     pub async fn remote_realpath(&mut self, path: &str) -> Result<String, String> {
         let sftp = self.open_sftp().await?;
-        sftp.canonicalize(path)
+        let resolved = sftp
+            .canonicalize(path)
             .await
-            .map_err(|e| format!("realpath {path}: {e}"))
+            .map_err(|e| format!("realpath {path}: {e}"))?;
+        // 个别受限 shell 对空路径回空条目；归一化为当前目录，交由上层再探测。
+        if resolved.trim().is_empty() {
+            Ok(".".to_string())
+        } else {
+            Ok(resolved)
+        }
     }
 
     /// B3：lstat（不跟随末级 symlink）。Ok(None) = 目标不存在。

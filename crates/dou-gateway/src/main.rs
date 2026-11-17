@@ -117,7 +117,7 @@ async fn main() {
                         let short = hostkey::short_id(&conn.host_key);
                         let first_seen = conn.host_key_first_seen;
                         println!(
-                            "ok ({}@{}:{} via {} · 主机公钥 {} · {})",
+                            "ok ({}@{}:{} via {} · 主机公钥 {} · {} · 家目录 {})",
                             conn.user,
                             conn.host,
                             conn.port,
@@ -127,7 +127,8 @@ async fn main() {
                                 "首次记录"
                             } else {
                                 "与记录一致"
-                            }
+                            },
+                            conn.home_dir
                         );
                         let method = conn.auth_method;
                         sessions.lock().await.insert("default".to_string(), conn);
@@ -420,7 +421,7 @@ async fn audit_export(State(st): State<AppState>, uri: axum::http::Uri) -> Respo
 }
 
 /// S3 策略配置页：内置规则 + 自定义规则只读列表（改规则走安全流程，不在界面放开写）。
-async fn policy_rules(State(st): State<AppState>) -> Response {
+async fn policy_rules(State(_st): State<AppState>) -> Response {
     let (items, err) = match store::list_rules(None) {
         Ok(list) => (list, None),
         Err(e) => (vec![], Some(e)),
@@ -439,7 +440,7 @@ async fn policy_rules(State(st): State<AppState>) -> Response {
 }
 
 /// S3 实验详情页：快照指纹聚合（同一实验重跑聚合为 runs，结果目录取最新）。
-async fn snapshots_list(State(st): State<AppState>) -> Response {
+async fn snapshots_list(State(_st): State<AppState>) -> Response {
     let (items, err) = match store::list_snapshots(200) {
         Ok(list) => (list, None),
         Err(e) => (vec![], Some(e)),
@@ -624,7 +625,7 @@ async fn vault_status(State(st): State<AppState>) -> Response {
 }
 
 /// 私钥记录列表：id / label / host_id / created_at，无 ciphertext / salt。
-async fn vault_keys_list(State(st): State<AppState>) -> Response {
+async fn vault_keys_list(State(_st): State<AppState>) -> Response {
     match crate::store::open() {
         Ok(conn) => match vault::list_keys(&conn) {
             Ok(items) => json_ok(&json!({ "count": items.len(), "items": items })),
@@ -847,7 +848,7 @@ async fn revoke_token(State(st): State<AppState>, body: String) -> Response {
 
 // ---------- 接入向导：配置片段生成 ----------
 
-async fn onboard_config(State(st): State<AppState>, uri: axum::http::Uri) -> Response {
+async fn onboard_config(State(_st): State<AppState>, uri: axum::http::Uri) -> Response {
     let params: std::collections::HashMap<String, String> = uri
         .query()
         .unwrap_or("")
@@ -859,7 +860,7 @@ async fn onboard_config(State(st): State<AppState>, uri: axum::http::Uri) -> Res
         .get("client")
         .map(|s| s.as_str())
         .unwrap_or("workbuddy");
-    let endpoint = format!("http://127.0.0.1:7419/mcp");
+    let endpoint = "http://127.0.0.1:7419/mcp".to_string();
     // 安全：HTTP 响应绝不回吐完整主令牌。片段用占位符；
     // 真实令牌由 /onboard/write 在服务端本地代写，或用户从 token.txt 手动替换。
     let auth = "Bearer ${DOU_TOKEN}".to_string();

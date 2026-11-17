@@ -257,7 +257,6 @@ mod tests {
     fn backoff_is_capped() {
         let c = mem();
         let k = subject_key(SubjectKind::Anonymous, "bad2");
-        let mut last = 0;
         for _ in 0..12 {
             failure_on(&c, &k, &cfg()).unwrap();
             // 把窗口起点拉回现在，避免窗口过期干扰
@@ -274,9 +273,8 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        last = lock;
-        assert!(last <= 30_000, "退避必须封顶，实际 {last}ms");
-        assert!(last >= 1_000, "至少应有基础锁定，实际 {last}ms");
+        assert!(lock <= 30_000, "退避必须封顶，实际 {lock}ms");
+        assert!(lock >= 1_000, "至少应有基础锁定，实际 {lock}ms");
     }
 
     #[test]
