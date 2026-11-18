@@ -401,4 +401,20 @@ mod tests {
             .unwrap();
         assert!(unlock_on(&conn2, "correct-passphrase").is_err());
     }
+
+    #[test]
+    fn from_hex_rejects_odd_len_and_bad_chars() {
+        assert!(from_hex("abc").is_err(), "奇数长度必须报错");
+        assert!(from_hex("zz").is_err(), "非法 hex 字符必须报错");
+        assert_eq!(from_hex("0fa9").unwrap(), vec![0x0f, 0xa9]);
+        assert_eq!(from_hex("").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn unseal_rejects_too_short_blob_fail_closed() {
+        let kek = [2u8; 32];
+        // 远小于 nonce(12)+tag(16) 的密文，必须 fail-closed 不 panic
+        assert!(unseal("00", &kek).is_err());
+        assert!(unseal("", &kek).is_err());
+    }
 }
