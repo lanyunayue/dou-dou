@@ -11,6 +11,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { activeTarget, SSH_KEY, sshError, audit, handleSshFailure, type SshTarget } from './useSsh'
 import { notify } from '../shared/feedback'
 import { nextTabSid, prevTabSid } from '../shared/tabNav'
+import { cleanExport } from '../shared/ansi'
 import type { TerminalTab, SessionMeta } from '../shared/types'
 
 // 终端状态：多会话标签 / 当前会话 / 检索 / 广播
@@ -352,15 +353,6 @@ export async function restoreLastSessions() {
   } finally {
     restoringSessions.value = false
   }
-}
-
-export function cleanExport(raw: string): string {
-  return raw
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')   // ANSI CSI
-    .replace(/\x1b\][^\x07]*\x07/g, '')        // OSC
-    .replace(/\x0c/g, '')                       // 分页符
-    .replace(/[^\n]*\r/g, '')                   // 回车覆盖字节
-    .replace(/\x1b[()][AB012]/g, '')            // 字符集切换
 }
 
 export function exportTerm() {
