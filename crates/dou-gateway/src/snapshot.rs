@@ -198,4 +198,18 @@ mod tests {
         let ctx = Context::from_probe_output("/\n---\n1 ---\nno-gpu", &long);
         assert_eq!(ctx.log_tail.len(), 400);
     }
+
+    #[test]
+    fn probe_output_missing_segments_do_not_panic() {
+        let empty = Context::from_probe_output("", "");
+        assert_eq!(empty.cwd, "");
+        assert_eq!(empty.pid, "");
+        assert_eq!(empty.gpu, "");
+        assert_eq!(empty.log_tail, "");
+        // 只有 cwd 段，其余段缺失回落空串
+        let partial = Context::from_probe_output("/only-cwd", "t");
+        assert_eq!(partial.cwd, "/only-cwd");
+        assert_eq!(partial.pid, "");
+        assert_eq!(partial.gpu, "");
+    }
 }
