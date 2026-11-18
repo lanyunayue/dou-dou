@@ -298,4 +298,11 @@ mod tests {
         assert!(d.window_ms > 0 && d.max_failures > 0);
         assert!(d.base_lock_ms <= d.max_lock_ms);
     }
+
+    #[test]
+    fn subject_kind_tags_are_distinct() {
+        assert_eq!(SubjectKind::Master.tag(), "m");
+        assert_eq!(SubjectKind::Device.tag(), "d");
+        assert_eq!(SubjectKind::Anonymous.tag(), "a");
+    }
 }
