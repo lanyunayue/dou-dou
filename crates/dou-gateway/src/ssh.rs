@@ -340,3 +340,47 @@ impl SshConnection {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_home_root_and_normal_user() {
+        assert_eq!(infer_home("root"), "/root");
+        assert_eq!(infer_home("demo"), "/home/demo");
+    }
+
+    #[test]
+    fn rejection_reason_none_when_clean() {
+        let st = HostKeyState::default();
+        assert!(rejection_reason(&st).is_none());
+    }
+
+    #[test]
+    fn rejection_reason_corrupted_takes_priority() {
+        let mut st = HostKeyState::default();
+        st.corrupted = true;
+        st.rejected = true;
+        let reason = rejection_reason(&st).unwrap();
+        assert!(reason.contains("损坏"));
+    }
+
+    #[test]
+    fn rejection_reason_mismatch_lists_fingerprints() {
+        let mut st = HostKeyState::default();
+        st.rejected = true;
+        st.stored = Some("SHA256:abc".into());
+        st.line = Some("SHA256:def".into());
+        let reason = rejection_reason(&st).unwrap();
+        assert!(reason.contains("不匹配"));
+    }
+
+    #[test]
+    fn normalize_home_trims_and_strips_trailing_slash() {
+        assert_eq!(SshConnection::normalize_home(""), "");
+        assert_eq!(SshConnection::normalize_home("."), "");
+        assert_eq!(SshConnection::normalize_home("/"), "/");
+        assert_eq!(SshConnection::normalize_home("  /home/dou/  "), "/home/dou");
+    }
+}

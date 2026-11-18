@@ -1232,3 +1232,45 @@ fn parse_spec(spec: &str) -> Option<(String, String, u16)> {
     }
     Some((user.to_string(), host.to_string(), port))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_binds_recognized() {
+        assert!(is_loopback("127.0.0.1:7419"));
+        assert!(is_loopback("localhost:22"));
+        assert!(is_loopback("[::1]:22"));
+    }
+
+    #[test]
+    fn non_loopback_binds_rejected() {
+        assert!(!is_loopback("0.0.0.0:22"));
+        assert!(!is_loopback("192.168.1.1:22"));
+    }
+
+    #[test]
+    fn parse_spec_with_port() {
+        assert_eq!(
+            parse_spec("demo@test.rebex.net:22"),
+            Some(("demo".into(), "test.rebex.net".into(), 22))
+        );
+    }
+
+    #[test]
+    fn parse_spec_defaults_port_22() {
+        assert_eq!(
+            parse_spec("root@10.0.0.5"),
+            Some(("root".into(), "10.0.0.5".into(), 22))
+        );
+    }
+
+    #[test]
+    fn parse_spec_rejects_malformed() {
+        assert!(parse_spec("no-at-sign").is_none());
+        assert!(parse_spec("@host:22").is_none());
+        assert!(parse_spec("user@:22").is_none());
+        assert!(parse_spec("user@host:abc").is_none());
+    }
+}
