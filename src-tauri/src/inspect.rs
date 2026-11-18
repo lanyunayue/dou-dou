@@ -334,4 +334,40 @@ root     tty1     -                08:00    3.00  1.00s  0.10s /sbin/init
         assert_eq!(rows[1].from, "-");
         assert_eq!(rows[1].what, "/sbin/init");
     }
+
+    #[test]
+    fn parse_etime_formats_and_garbage() {
+        // MM:SS 两部件
+        assert_eq!(parse_etime("0:01"), 1);
+        assert_eq!(parse_etime("12:30"), 12 * 60 + 30);
+        // 非法 / 空串兜底 0
+        assert_eq!(parse_etime("garbage"), 0);
+        assert_eq!(parse_etime(""), 0);
+    }
+
+    #[test]
+    fn parse_ss_process_missing_or_no_pid() {
+        // 无进程字段：空名、pid None
+        assert_eq!(parse_ss_process(""), (String::new(), None));
+        assert_eq!(parse_ss_process("users:()"), (String::new(), None));
+        // 有进程名但缺 pid：保留名字，pid None
+        let (name, pid) = parse_ss_process("users:(\"mysqld\")");
+        assert_eq!(name, "mysqld");
+        assert_eq!(pid, None);
+    }
+
+    #[test]
+    fn parse_df_clamps_over_100() {
+        let rows = parse_df("/dev/sda1  40G  38G  1.0G 150% /overflow\n");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].use_pct, 100.0);
+    }
+
+    #[test]
+    fn parse_ps_skips_short_lines() {
+        // 列数不足五列：跳过，不 panic
+        let rows = parse_ps("100 root 1.0 1.0\n  200 root 2.0 1.0 0:05 sleep 2\n");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].pid, 200);
+    }
 }
