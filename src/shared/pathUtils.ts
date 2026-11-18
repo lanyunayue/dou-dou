@@ -14,6 +14,13 @@ export function joinRemote(dir: string, name: string): string {
   return d === '' ? '/' + n : d + '/' + n
 }
 
+/** 取远端目录的父级绝对路径；根目录、空路径或单层目录返回 `/`。 */
+export function parentRemote(p: string): string {
+  const parts = p.split('/').filter(Boolean)
+  if (parts.length <= 1) return '/'
+  return '/' + parts.slice(0, -1).join('/')
+}
+
 /**
  * 从 `pwd` 输出（可能混有 ANSI 转义 / 提示符）中提取最后一个绝对路径。
  * 解析层备用：终端 PTY 的当前目录回传需真机/回环验证后再接前端；

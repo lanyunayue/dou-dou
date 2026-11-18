@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { baseName, joinRemote, parsePwdOutput } from '../../shared/pathUtils'
+import { baseName, joinRemote, parsePwdOutput, parentRemote } from '../../shared/pathUtils'
 
 describe('baseName', () => {
   it('取正斜杠路径末段', () => {
@@ -44,5 +44,22 @@ describe('parsePwdOutput', () => {
   it('相对路径或空输出返回 null', () => {
     expect(parsePwdOutput('relative-dir')).toBeNull()
     expect(parsePwdOutput('')).toBeNull()
+  })
+})
+
+describe('parentRemote', () => {
+  it('根目录与空路径返回 /', () => {
+    expect(parentRemote('/')).toBe('/')
+    expect(parentRemote('')).toBe('/')
+  })
+  it('单层目录回到 /', () => {
+    expect(parentRemote('/home')).toBe('/')
+  })
+  it('多级目录去掉末段', () => {
+    expect(parentRemote('/home/dou')).toBe('/home')
+    expect(parentRemote('/a/b/c')).toBe('/a/b')
+  })
+  it('忽略尾斜杠', () => {
+    expect(parentRemote('/home/dou/')).toBe('/home')
   })
 })

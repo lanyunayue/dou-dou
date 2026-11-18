@@ -7,7 +7,7 @@ import { openRemoteFile } from './useEditor'
 import { useRequestGuard } from './useRequestGuard'
 import { loadTq } from './useTransferQueue'
 import { notify } from '../shared/feedback'
-import { baseName, joinRemote } from '../shared/pathUtils'
+import { baseName, joinRemote, parentRemote } from '../shared/pathUtils'
 import type { RemoteFile } from '../shared/types'
 
 // 文件树状态：当前目录 / 目录项 / 过滤器
@@ -47,8 +47,7 @@ export async function loadFiles(path: string) {
 
 export function goUp() {
   if (cwd.value === '/' || cwd.value === '') return
-  const parent = cwd.value.split('/').filter(Boolean).slice(0, -1).join('/')
-  loadFiles(parent === '' ? '/' : '/' + parent)
+  loadFiles(parentRemote(cwd.value))
 }
 
 export async function downloadCwd() {
