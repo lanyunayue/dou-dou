@@ -1183,6 +1183,23 @@ mod tests {
         assert!(estimate_impact("git push origin").contains("提交"));
     }
 
+    #[test]
+    fn impact_estimation_covers_all_branches() {
+        assert!(estimate_impact("mkfs.ext4 /dev/sda1").contains("块设备"));
+        assert!(estimate_impact("fdisk /dev/sdb").contains("块设备"));
+        assert!(estimate_impact("dd if=/dev/zero of=/dev/sda").contains("块设备"));
+        assert!(estimate_impact("chmod 700 key").contains("权限"));
+        assert!(estimate_impact("chown root:root f").contains("属主"));
+        assert!(estimate_impact("sudo reboot").contains("提权"));
+        assert!(estimate_impact("su root").contains("提权"));
+        assert!(estimate_impact("mv a b").contains("移动"));
+        assert!(estimate_impact("cp a b").contains("复制"));
+        assert!(estimate_impact("echo hi > out.txt").contains("重定向"));
+        assert!(estimate_impact("ls -la").contains("人工确认"));
+        // 大小写不敏感
+        assert!(estimate_impact("RM -RF /tmp/x").contains("删除"));
+    }
+
     // ---------- B3：symlink 真实解析决策核心 ----------
 
     #[test]
