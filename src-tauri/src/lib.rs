@@ -349,6 +349,17 @@ fn vault_remove_target(state: tauri::State<'_, VaultState>, name: String) -> Res
     vault::vault_remove_target(state, name)
 }
 #[tauri::command]
+fn vault_export(state: tauri::State<'_, VaultState>) -> Result<String, String> {
+    vault::vault_export(state)
+}
+#[tauri::command]
+fn vault_import(
+    state: tauri::State<'_, VaultState>,
+    source: Option<String>,
+) -> Result<usize, String> {
+    vault::vault_import(state, source)
+}
+#[tauri::command]
 fn vault_notify(app: tauri::AppHandle, unlocked: bool) {
     vault::vault_notify(app, unlocked)
 }
@@ -440,6 +451,8 @@ pub fn run() {
             vault_get_key,
             vault_test_connect,
             vault_remove_target,
+            vault_export,
+            vault_import,
             vault_notify
         ])
         .run(tauri::generate_context!())

@@ -561,6 +561,78 @@ pub fn vault_remove_target(state: State<VaultState>, name: String) -> Result<(),
     Ok(())
 }
 
+// ------------------------- 换机迁移（导出 / 导入） -------------------------
+
+/// 纳秒时间戳（不引入 chrono 依赖），用于备份与导出文件名去重。
+fn now_stamp() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
+/// 导入前把现有保险库备份为 `vault.json.bak-<stamp>`；无现有文件则跳过。
+/// 备份失败必须中止导入，避免来源文件损坏后无旧库可回退。
+fn backup_vault(path: &Path) -> Result<Option<PathBuf>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bak = path.with_file_name(format!("vault.json.bak-{}", now_stamp()));
+    std::fs::copy(path, &bak).map_err(|e| format!("备份现有保险库失败：{e}；本次导入已中止。"))?;
+    Ok(Some(bak))
+}
+
+/// 导出当前保险库：**原样复制加密后的 vault.json**，不做任何解密。
+///
+/// 密文随文件一起走换机；在新机器上用**原主密码**解锁即可，无需重新输入私钥。
+/// 返回导出文件的绝对路径，供前端在资源管理器中定位。
+pub fn vault_export(state: State<VaultState>) -> Result<String, String> {
+    // 未初始化 / 损坏按既有口径报错，避免导出一个不可用的空文件。
+    let _ = read_vault(&state.path).map_err(|e| load_err_msg(&state.path, &e))?;
+    let out_dir = ssh::app_data_dir().join("exports");
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建导出目录失败：{e}"))?;
+    let dest = out_dir.join(format!("dou-vault-export-{}.json", now_stamp()));
+    std::fs::copy(&state.path, &dest).map_err(|e| format!("导出失败：{e}"))?;
+    Ok(dest.display().to_string())
+}
+
+/// 导入保险库：校验来源是合法的保险库结构后，备份现有库并原样写入。
+///
+/// - 只校验 JSON 结构 / 迭代次数，**不校验主密码**（密文来自旧机器，主密码在旧机器上）；
+///   导入后回到锁定态，需在本机用原主密码解锁。
+/// - `source` 缺省取固定导入位置 `vault.import.json`；显式传入路径时以传入为准。
+/// - 导入成功后清理固定临时导入文件（避免密文副本长期残留）。
+///
+/// 返回导入的档案条目数。
+pub fn vault_import(state: State<VaultState>, source: Option<String>) -> Result<usize, String> {
+    let src = source
+        .map(PathBuf::from)
+        .unwrap_or_else(|| ssh::app_data_dir().join("vault.import.json"));
+    let vf = read_vault(&src).map_err(|e| match e {
+        VaultLoadError::NotFound => format!(
+            "未找到待导入的保险库文件。请先把备份文件复制到：{}\n（命名为 vault.import.json），再点导入。",
+            ssh::app_data_dir().display()
+        ),
+        VaultLoadError::Corrupt(detail) => {
+            format!("待导入文件不是合法保险库，已拒绝导入：{detail}")
+        }
+    })?;
+    let count = vf.targets.len();
+
+    backup_vault(&state.path)?;
+    std::fs::copy(&src, &state.path).map_err(|e| format!("写入保险库失败：{e}"))?;
+
+    // 导入后强制回到锁定态：内存里的旧派生密钥作废，需用原主密码重新解锁。
+    *state.key.lock().unwrap() = None;
+    *state.unlocked.lock().unwrap() = false;
+
+    let default_src = ssh::app_data_dir().join("vault.import.json");
+    if src == default_src {
+        let _ = std::fs::remove_file(&src);
+    }
+    Ok(count)
+}
+
 // 解锁后向前端广播状态变化（前端据此刷新面板）。
 pub fn vault_notify(app: AppHandle, unlocked: bool) {
     let _ = app.emit("vault_status", unlocked);
@@ -831,6 +903,40 @@ mod tests {
         assert!(active.exists(), "当前生效的私钥必须保留");
         assert!(pubkey.exists(), "公钥文件必须保留");
         assert!(unrelated.exists(), "无关文件必须保留");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 迁移回归：导入来源不是合法保险库时必须拒绝，且现有库原样保留。
+    #[test]
+    fn import_rejects_corrupt_source_and_keeps_existing() {
+        let dir = temp_dir("import");
+        let path = dir.join("vault.json");
+        init_vault_at(&path, "master").unwrap();
+        let existing = std::fs::read_to_string(&path).unwrap();
+
+        let src = dir.join("vault.import.json");
+        std::fs::write(&src, "{ broken not json").unwrap();
+        assert!(matches!(read_vault(&src), Err(VaultLoadError::Corrupt(_))));
+        // 现有保险库不得被覆盖。
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), existing);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 迁移回归：导入前现有库被备份为 .bak，内容与原库一致。
+    #[test]
+    fn backup_creates_bak_when_existing() {
+        let dir = temp_dir("bak");
+        let path = dir.join("vault.json");
+        init_vault_at(&path, "master").unwrap();
+
+        let bak = backup_vault(&path).unwrap().unwrap();
+        assert!(bak.exists());
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            std::fs::read_to_string(&path).unwrap()
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

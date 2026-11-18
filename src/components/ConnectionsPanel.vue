@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { SSH_KEY } from '../core/useSsh'
 import { sshError } from '../core/useSsh'
 import { notify, askConfirm } from '../shared/feedback'
@@ -152,6 +153,26 @@ async function removeTarget(name: string) {
   catch (e: any) { notify('删除失败: ' + e) }
 }
 
+// 换机迁移：导出 = 原样复制加密后的保险库文件（不解密）；导入 = 校验结构后备份现有库并覆盖。
+async function exportVault() {
+  try {
+    const path = await invoke<string>('vault_export')
+    try { await revealItemInDir(path) } catch { /* 资源管理器定位失败不阻断导出结果 */ }
+    notify(`已导出加密档案：\n${path}\n\n换机时把该文件复制到新机器，用原主密码解锁即可，无需重新录入私钥。`)
+  } catch (e: any) { notify('导出失败: ' + e) }
+}
+
+async function importVault() {
+  if (!askConfirm('导入会先自动备份当前保险库，再用备份覆盖。\n请确认备份文件已放到应用数据目录并命名为 vault.import.json。\n继续？')) return
+  try {
+    const n = await invoke<number>('vault_import')
+    unlocked.value = false
+    targets.value = []
+    notify(`已导入 ${n} 个档案。请用原主密码解锁后查看。`)
+    await load()
+  } catch (e: any) { notify('导入失败: ' + e) }
+}
+
 function fingerprintOf(addr: string): string {
   const k = hostKeys.value.find((h: any) => `${h.host}:${h.port}` === addr)
   return k?.fingerprint ? String(k.fingerprint).slice(0, 20) + '…' : '未记录（首次连接时确认）'
@@ -192,6 +213,13 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
           <span class="hint ok-text">保险库已解锁</span>
           <button type="button" class="btn bad" @click="vaultLock">锁定</button>
         </template>
+      </div>
+
+      <!-- 换机迁移：导出加密备份 / 从备份导入 -->
+      <div class="row vault-migrate">
+        <button type="button" class="btn" @click="exportVault">📤 导出档案（换机备份）</button>
+        <button type="button" class="btn" @click="importVault">📥 导入档案</button>
+        <span class="hint">导出的是加密文件；换机用原主密码解锁。导入需先把备份放到应用数据目录的 vault.import.json。</span>
       </div>
 
       <!-- 3 步快速添加 -->
@@ -275,6 +303,7 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
 .pw-row .filter { max-width: 260px; }
 .conn-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .vault-state { margin-top: 4px; }
+.vault-migrate { flex-wrap: wrap; gap: 8px; align-items: center; }
 /* R8：双击连接主路径的可供性暗示 */
 .clickable { cursor: pointer; }
 .clickable:hover { border-color: var(--dou-accent); }
