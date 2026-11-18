@@ -8,6 +8,7 @@ import { useRequestGuard } from './useRequestGuard'
 import { loadTq } from './useTransferQueue'
 import { notify } from '../shared/feedback'
 import { baseName, joinRemote, parentRemote } from '../shared/pathUtils'
+import { filterVisibleFiles } from '../shared/fileFilter'
 import type { RemoteFile } from '../shared/types'
 
 // 文件树状态：当前目录 / 目录项 / 过滤器
@@ -21,11 +22,9 @@ export const filesError = ref('')
 // 竞态守卫：快速连续切换目录时，先发的慢响应不得覆盖新目录结果
 const loadGuard = useRequestGuard()
 
-export const visibleFiles = computed(() => files.value.filter(f => {
-  if (!showHidden.value && f.name.startsWith('.')) return false
-  if (fileFilter.value && !f.name.toLowerCase().includes(fileFilter.value.toLowerCase())) return false
-  return true
-}))
+export const visibleFiles = computed(() =>
+  filterVisibleFiles(files.value, showHidden.value, fileFilter.value),
+)
 
 export async function loadFiles(path: string) {
   const args = sshArgs()
