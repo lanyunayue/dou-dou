@@ -86,6 +86,7 @@ import {
 } from '../core/useTerminal'
 import { sshError } from '../core/useSsh'
 import { hostStats, monitorUnsupported } from '../core/useMonitor'
+import { memPercent, meterClass, fmtKbps, fmtUptime } from '../shared/monitorFmt'
 import 'xterm/css/xterm.css'
 
 // R6 溢出菜单开关（点按钮切换，点遮罩关闭）
@@ -114,16 +115,10 @@ function onTermKeydown(ev: KeyboardEvent) {
   if (!ev.shiftKey && ev.key.toLowerCase() === 'f') { ev.preventDefault(); openSearch(); void focusSearch() }
 }
 
-// 监控条展示：内存占比与分档色（<60 正常 / 60-85 偏高 / ≥85 告警）
+// 监控条展示：内存占比与分档色（<60 正常 / 60-85 偏高 / ≥85 告警），格式化纯函数见 shared/monitorFmt
 const memPct = computed(() =>
-  hostStats.value ? Math.round(hostStats.value.mem_used_mb / Math.max(hostStats.value.mem_total_mb, 1) * 100) : 0
+  hostStats.value ? memPercent(hostStats.value.mem_used_mb, hostStats.value.mem_total_mb) : 0
 )
-function meterClass(v: number) { return v >= 85 ? 'hot' : v >= 60 ? 'warm' : '' }
-function fmtKbps(k: number) { return k >= 1024 ? (k / 1024).toFixed(1) + 'MB/s' : k.toFixed(1) + 'KB/s' }
-function fmtUptime(s: number) {
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60)
-  return h ? `${h}h${m}m` : `${m}m`
-}
 </script>
 
 <style scoped>
