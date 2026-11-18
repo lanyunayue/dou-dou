@@ -338,4 +338,15 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
+
+    #[test]
+    fn now_ts_is_u64_millis_and_trace_id_is_hex() {
+        let ts: u64 = now_ts().parse().expect("now_ts 应为毫秒数字串");
+        assert!(ts > 0);
+        let tid = trace_id();
+        assert!(tid.starts_with('t'));
+        let hex_part = &tid[1..];
+        assert!(!hex_part.is_empty());
+        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
