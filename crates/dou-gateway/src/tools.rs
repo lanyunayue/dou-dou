@@ -1283,4 +1283,14 @@ mod tests {
         assert_eq!(err["isError"], true);
         assert_eq!(err["content"][0]["text"], "boom");
     }
+
+    #[test]
+    fn not_implemented_carries_tool_and_reason() {
+        let v = not_implemented("upload", "暂未开放");
+        assert_eq!(v["isError"], false);
+        let inner: Value = serde_json::from_str(v["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(inner["status"], "not_implemented");
+        assert_eq!(inner["tool"], "upload");
+        assert_eq!(inner["reason"], "暂未开放");
+    }
 }
