@@ -49,7 +49,8 @@ export async function revokeToken(id: string) {
 
 export async function copyIssued() { await navigator.clipboard.writeText(issuedToken.value); notify('已复制') }
 
-export function fmtTime(sec: number) { return sec ? new Date(sec * 1000).toLocaleString() : '-' }
+// 后端 expires_at 为 epoch 毫秒（与 created_ms/collected_at 同口径），直接按毫秒解析。
+export function fmtTime(ms: number) { return ms ? new Date(ms).toLocaleString('zh-CN', { hour12: false }) : '-' }
 
 export function useCredentials() {
   return { tokens, issueTier, issueClient, issuedToken, loadTokens, issueToken, revokeToken, copyIssued, fmtTime }
