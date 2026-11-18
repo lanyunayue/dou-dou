@@ -78,10 +78,26 @@ mod tests {
         assert_eq!(
             entries,
             vec![
-                SftpEntry { name: "app".into(), is_dir: true, size: 0 },
-                SftpEntry { name: "pub".into(), is_dir: true, size: 0 },
-                SftpEntry { name: "config.json".into(), is_dir: false, size: 0 },
-                SftpEntry { name: "readme.txt".into(), is_dir: false, size: 0 },
+                SftpEntry {
+                    name: "app".into(),
+                    is_dir: true,
+                    size: 0
+                },
+                SftpEntry {
+                    name: "pub".into(),
+                    is_dir: true,
+                    size: 0
+                },
+                SftpEntry {
+                    name: "config.json".into(),
+                    is_dir: false,
+                    size: 0
+                },
+                SftpEntry {
+                    name: "readme.txt".into(),
+                    is_dir: false,
+                    size: 0
+                },
             ]
         );
     }
