@@ -1,6 +1,7 @@
 import { tabs, activeSid } from '../core/useTerminal'
 import { cwd } from '../core/useFileTree'
 import { notify } from '../shared/feedback'
+import { parseMobaSessions } from '../shared/mobaImport'
 
 // ---------- 侧边栏动作：快照 / 导入 MobaXterm ----------
 export async function hash8(s: string): Promise<string> {
@@ -25,24 +26,7 @@ export async function importMoba() {
   for (const p of paths) {
     try {
       const txt = await fs.readTextFile(p)
-      const sessions: any[] = []
-      // 形式一：SessionN=ssh://user@host:port
-      for (const line of txt.split(/\r?\n/)) {
-        const m = line.match(/ssh:\/\/([^@]+)@([^:]+):(\d+)/)
-        if (m) sessions.push({ user: m[1], host: m[2], port: Number(m[3]), source: 'mobaxterm' })
-      }
-      // 形式二：[别名] 段内 Username/Hostname/Port
-      let cur: any = null
-      for (const line of txt.split(/\r?\n/)) {
-        const sec = line.match(/^\[(.+)\]$/)
-        if (sec) { cur = { alias: sec[1] }; continue }
-        if (cur && /^(Username|Hostname|Port)=/i.test(line)) {
-          const [k, v] = line.split('=')
-          if (/username/i.test(k)) cur.user = v
-          if (/hostname/i.test(k)) cur.host = v
-          if (/port/i.test(k)) cur.port = Number(v)
-        }
-      }
+      const sessions = parseMobaSessions(txt)
       const existing = JSON.parse(localStorage.getItem('dou_imported')||'[]')
       const merged = [...existing, ...sessions]
       localStorage.setItem('dou_imported', JSON.stringify(merged))
