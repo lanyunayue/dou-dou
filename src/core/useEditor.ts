@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { sshArgs, sshOfflineReason, audit } from './useSsh'
 import { emit } from '../events/useEventBus'
 import { notify, askConfirm } from '../shared/feedback'
+import { isLargeFile, largeFileNotice } from '../shared/editorFile'
 import type { RemoteStat } from '../shared/types'
 
 // 编辑器状态：当前打开的远端文件 / 远端属性（size, mtime）/ 文本内容
@@ -27,8 +28,8 @@ export async function openRemoteFile(path: string) {
     const st = await invoke('remote_stat', { ...args, remote: path }) as [number, number]
     editingStat.value = { size: st[0], mtime: st[1] }
     // F-04 大文件懒加载：超过 2MB 不直接载入编辑器
-    if (editingStat.value.size > 2 * 1024 * 1024) {
-      editorText.value = `// 文件较大（${(editingStat.value.size/1024/1024).toFixed(1)} MB），已懒加载，不直接展开全文`
+    if (isLargeFile(editingStat.value.size)) {
+      editorText.value = largeFileNotice(editingStat.value.size)
     }
   } catch (e: any) { editingStat.value = null; editorFail(e, '读取远端文件属性') }
   emit('file:opened', path)
