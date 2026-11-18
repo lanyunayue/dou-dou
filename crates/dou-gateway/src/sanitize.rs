@@ -117,4 +117,71 @@ mod tests {
         let out = s.sanitize("Linux version 6.18.33.2-microsoft-standard-WSL2");
         assert!(out.contains("Linux version"));
     }
+
+    #[test]
+    fn redacts_aws_key() {
+        let s = Sanitizer::new();
+        let out = s.sanitize("key AKIAIOSFODNN7EXAMPLE here");
+        assert!(out.contains("[REDACTED:AWS KEY]"));
+        assert!(!out.contains("AKIAIOSFODNN7EXAMPLE"));
+    }
+
+    #[test]
+    fn redacts_bearer_case_insensitive() {
+        let s = Sanitizer::new();
+        let out = s.sanitize("Authorization: Bearer abc123.def-xyz_9");
+        assert!(out.contains("Bearer [REDACTED]"));
+        assert!(!out.contains("abc123.def-xyz_9"));
+        let lower = s.sanitize("bearer tok_lowercase_001");
+        assert!(lower.contains("Bearer [REDACTED]"));
+    }
+
+    #[test]
+    fn redacts_jwt() {
+        let s = Sanitizer::new();
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let out = s.sanitize(&format!("token {jwt}"));
+        assert!(out.contains("[REDACTED:JWT]"));
+        assert!(!out.contains("eyJhbGciOiJIUzI1NiI"));
+    }
+
+    #[test]
+    fn redacts_sensitive_paths() {
+        let s = Sanitizer::new();
+        for p in [
+            "/root/.ssh/id_rsa",
+            "/home/dou/.ssh/authorized_keys",
+            "/etc/shadow",
+            "/etc/sudoers.d/99",
+        ] {
+            let out = s.sanitize(p);
+            assert!(out.contains("[REDACTED:PATH]"), "{p} 应被遮蔽");
+        }
+    }
+
+    #[test]
+    fn internal_ip_ranges_redacted_public_kept() {
+        let s = Sanitizer::new();
+        for ip in ["10.1.2.3", "192.168.1.10", "172.16.0.1", "172.31.9.9"] {
+            assert!(s.sanitize(ip).contains("[REDACTED:IP]"), "{ip} 属内网应遮蔽");
+        }
+        // 公网地址不在内网段，保留
+        assert!(!s.sanitize("8.8.8.8").contains("[REDACTED:IP]"));
+        assert!(!s.sanitize("1.1.1.1").contains("[REDACTED:IP]"));
+        // 172.15 / 172.32 不在 16-31 段，不遮蔽
+        assert!(!s.sanitize("172.15.0.1").contains("[REDACTED:IP]"));
+        assert!(!s.sanitize("172.32.0.1").contains("[REDACTED:IP]"));
+    }
+
+    #[test]
+    fn mixed_secrets_cleaned_in_one_pass() {
+        let s = Sanitizer::new();
+        let text = "host 10.0.0.5 uses Bearer zzz.zzz and AKIAIOSFODNN7EXAMPLE, see /root/.ssh/id_rsa";
+        let out = s.sanitize(text);
+        assert!(!out.contains("10.0.0.5"));
+        assert!(!out.contains("zzz.zzz"));
+        assert!(!out.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(!out.contains("/root/.ssh/id_rsa"));
+        assert!(out.contains("[REDACTED:IP]"));
+    }
 }
