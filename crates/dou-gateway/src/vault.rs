@@ -417,4 +417,15 @@ mod tests {
         assert!(unseal("00", &kek).is_err());
         assert!(unseal("", &kek).is_err());
     }
+
+    #[test]
+    fn private_key_header_recognized_only_when_both_markers_present() {
+        assert!(looks_like_private_key(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nxxx\n-----END OPENSSH PRIVATE KEY-----"
+        ));
+        // 普通文本 / 只有 BEGIN / 只有 PRIVATE KEY 片段都不算私钥
+        assert!(!looks_like_private_key("hello world"));
+        assert!(!looks_like_private_key("-----BEGIN CERTIFICATE-----"));
+        assert!(!looks_like_private_key("PRIVATE KEY----- tail"));
+    }
 }
