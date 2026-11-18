@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { gwFetch } from '../adapters/useGateway'
 import { notify } from '../shared/feedback'
+import { verdictTone } from '../shared/verdict'
 import { useRequestGuard } from '../core/useRequestGuard'
 import StateShell from './StateShell.vue'
 
@@ -105,9 +106,8 @@ function fmtTime(item: AuditItem): string {
 }
 
 function verdictClass(v?: string): string {
-  if (v === 'allow' || v === 'granted' || v === 'ok') return 'v-allow'
-  if (v === 'deny' || v === 'denied' || v === 'blocked') return 'v-deny'
-  return 'v-ask'
+  const tone = verdictTone(v)
+  return tone === 'allow' ? 'v-allow' : tone === 'deny' ? 'v-deny' : 'v-ask'
 }
 
 const countText = computed(() => `共 ${items.value.length} 条（最多显示 300 条）`)
