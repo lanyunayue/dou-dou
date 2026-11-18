@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { notify } from '../shared/feedback'
+import { fmtBytes } from '../shared/format'
 
 // ---------- 传输队列 / 同步 ----------
 export const tqTasks = ref<any[]>([])
@@ -12,12 +13,8 @@ export const syncLocal = ref('')
 export const syncRemote = ref('')
 export const syncMode = ref('push')
 
-export function fmtBytes(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB']; let i = 0; let x = n
-  while (x >= 1024 && i < u.length - 1) { x /= 1024; i++ }
-  return (i ? x.toFixed(1) : String(x)) + ' ' + u[i]
-}
+// fmtBytes 纯格式化函数位于 shared/format.ts，此处重新导出供面板解构。
+export { fmtBytes }
 
 export async function loadTq() { try { tqTasks.value = await invoke('tq_list') } catch { tqTasks.value = [] } }
 export async function enqueueTq() {
