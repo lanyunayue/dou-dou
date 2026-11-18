@@ -132,4 +132,11 @@ mod tests {
             assert!(seen.insert(s), "CSPRNG 同批次出现重复值");
         }
     }
+
+    #[test]
+    fn mask_token_short_and_empty_does_not_panic() {
+        assert_eq!(mask_token(""), "dou_ak_****");
+        assert_eq!(mask_token("ab"), "dou_ak_****ab");
+        assert_eq!(mask_token("xyz"), "dou_ak_****xyz");
+    }
 }
