@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { gwFetch, gwError, markGwFailure } from '../adapters/useGateway'
 import { notify, askConfirm } from '../shared/feedback'
+import { fmtMs } from '../shared/timeFmt'
 
 // ---------- 凭据与作用域 ----------
 export const tokens = ref<any[]>([])
@@ -50,7 +51,7 @@ export async function revokeToken(id: string) {
 export async function copyIssued() { await navigator.clipboard.writeText(issuedToken.value); notify('已复制') }
 
 // 后端 expires_at 为 epoch 毫秒（与 created_ms/collected_at 同口径），直接按毫秒解析。
-export function fmtTime(ms: number) { return ms ? new Date(ms).toLocaleString('zh-CN', { hour12: false }) : '-' }
+export function fmtTime(ms: number) { return fmtMs(ms) }
 
 export function useCredentials() {
   return { tokens, issueTier, issueClient, issuedToken, loadTokens, issueToken, revokeToken, copyIssued, fmtTime }

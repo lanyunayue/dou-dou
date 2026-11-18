@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { gwFetch } from '../adapters/useGateway'
 import { notify } from '../shared/feedback'
+import { fmtMs } from '../shared/timeFmt'
 import { loadFiles } from '../core/useFileTree'
 import { navigateTo } from '../core/useNav'
 import { useRequestGuard } from '../core/useRequestGuard'
@@ -55,10 +56,7 @@ function openResultDir(dir: string) {
   navigateTo('term')
 }
 
-function fmtTime(ms: number): string {
-  if (!ms) return '-'
-  return new Date(ms).toLocaleString('zh-CN', { hour12: false })
-}
+const fmtTime = fmtMs
 
 onMounted(load)
 </script>

@@ -7,6 +7,7 @@ import { SSH_KEY } from '../core/useSsh'
 import { sshError } from '../core/useSsh'
 import { notify, askConfirm } from '../shared/feedback'
 import { filterTargets } from '../shared/filterTargets'
+import { authLabel as authLabelOf } from '../shared/credLabel'
 import { connectByTarget, type ArchiveTarget } from '../core/useTerminal'
 import { navigateTo } from '../core/useNav'
 import { useRequestGuard } from '../core/useRequestGuard'
@@ -143,8 +144,7 @@ function onCardDblClick(t: VaultTarget) {
 }
 
 function authLabel(t: VaultTarget): string {
-  if (t.enc_key) return '🔑 已加密'
-  return t.auth === 'password' ? '🔒 密码认证（连接时输入密码）' : '— 未配钥'
+  return authLabelOf(t.auth, t.enc_key)
 }
 
 async function removeTarget(name: string) {

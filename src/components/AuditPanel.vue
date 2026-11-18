@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { gwFetch } from '../adapters/useGateway'
 import { notify } from '../shared/feedback'
 import { verdictClass } from '../shared/verdict'
+import { fmtAuditTime } from '../shared/timeFmt'
 import { useRequestGuard } from '../core/useRequestGuard'
 import StateShell from './StateShell.vue'
 
@@ -99,10 +100,7 @@ async function exportCsv() {
 }
 
 function fmtTime(item: AuditItem): string {
-  const raw = item.ts_ms ?? item.ts ?? ''
-  const n = Number(raw)
-  if (!raw || !Number.isFinite(n) || n <= 0) return String(raw || '-')
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
+  return fmtAuditTime(item.ts_ms, item.ts)
 }
 
 const countText = computed(() => `共 ${items.value.length} 条（最多显示 300 条）`)
