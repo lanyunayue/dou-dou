@@ -242,4 +242,15 @@ mod tests {
         }
         assert_eq!(kh.entries().len(), 2);
     }
+
+    #[test]
+    fn short_id_truncates_blob_and_handles_short_input() {
+        let id = short_id("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxX");
+        assert!(id.starts_with("ssh-ed25519:"));
+        assert!(id.contains("…"));
+        // 空行不 panic，算法回落 ?
+        assert_eq!(short_id(""), "?:…");
+        // 极短 blob：头尾都取到整段，不 panic
+        assert_eq!(short_id("rsa AB"), "rsa:AB…AB");
+    }
 }
