@@ -58,23 +58,28 @@ impl KnownHosts {
                 //   2) 客户端（Tauri）：[ { host, port, fingerprint, ... } ]
                 // 空文件 / 空数组视为尚无记录，不判损坏；只有既非对象又非数组才算解析失败。
                 if trimmed.is_empty() {
-                    return Self { path, map: HashMap::new(), load_ok: true };
+                    return Self {
+                        path,
+                        map: HashMap::new(),
+                        load_ok: true,
+                    };
                 }
                 if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(trimmed) {
-                    return Self { path, map, load_ok: true };
+                    return Self {
+                        path,
+                        map,
+                        load_ok: true,
+                    };
                 }
-                if let Ok(entries) =
-                    serde_json::from_str::<Vec<serde_json::Value>>(trimmed)
-                {
+                if let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(trimmed) {
                     let mut map = HashMap::new();
                     for e in entries {
-                        let addr = e
-                            .get("host")
-                            .and_then(|v| v.as_str())
-                            .map(|h| match e.get("port").and_then(|p| p.as_u64()) {
+                        let addr = e.get("host").and_then(|v| v.as_str()).map(|h| {
+                            match e.get("port").and_then(|p| p.as_u64()) {
                                 Some(p) => format!("{h}:{p}"),
                                 None => h.to_string(),
-                            });
+                            }
+                        });
                         let key = e
                             .get("fingerprint")
                             .and_then(|v| v.as_str())
@@ -83,7 +88,11 @@ impl KnownHosts {
                             map.insert(addr, key.to_string());
                         }
                     }
-                    return Self { path, map, load_ok: true };
+                    return Self {
+                        path,
+                        map,
+                        load_ok: true,
+                    };
                 }
                 Self {
                     path,
@@ -211,7 +220,10 @@ mod tests {
         .unwrap();
         let kh = KnownHosts::load(p.clone());
         assert!(kh.load_ok);
-        assert_eq!(kh.map.get("example.test:22"), Some(&"SHA256:abc".to_string()));
+        assert_eq!(
+            kh.map.get("example.test:22"),
+            Some(&"SHA256:abc".to_string())
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

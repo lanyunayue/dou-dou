@@ -276,12 +276,19 @@ mod tests {
             paths: vec![],
             command_patterns: vec![],
             approval_policy: "observe".into(),
-            quota: Quota { ttl_sec: 1, max_calls: 1, concurrency: 1 },
+            quota: Quota {
+                ttl_sec: 1,
+                max_calls: 1,
+                concurrency: 1,
+            },
         };
         assert!(tool_allowed(&s, "exec"));
         assert!(!tool_allowed(&s, "write"));
 
-        let wild = Scope { tools: vec!["*".into()], ..s };
+        let wild = Scope {
+            tools: vec!["*".into()],
+            ..s
+        };
         assert!(tool_allowed(&wild, "write"));
         assert!(tool_allowed(&wild, "anything"));
     }
@@ -295,16 +302,26 @@ mod tests {
             paths: vec!["~/projects".into()],
             command_patterns: vec![],
             approval_policy: "observe".into(),
-            quota: Quota { ttl_sec: 1, max_calls: 1, concurrency: 1 },
+            quota: Quota {
+                ttl_sec: 1,
+                max_calls: 1,
+                concurrency: 1,
+            },
         };
         assert!(path_allowed(&s, "~/projects/a.txt"));
         assert!(!path_allowed(&s, "/etc/passwd"));
 
         // 路径根带尾斜杠时应归一
-        let trailing = Scope { paths: vec!["~/projects/".into()], ..s.clone() };
+        let trailing = Scope {
+            paths: vec!["~/projects/".into()],
+            ..s.clone()
+        };
         assert!(path_allowed(&trailing, "~/projects/x"));
 
-        let wild = Scope { paths: vec!["*".into()], ..s };
+        let wild = Scope {
+            paths: vec!["*".into()],
+            ..s
+        };
         assert!(path_allowed(&wild, "/anything/at/all"));
     }
 
@@ -319,7 +336,11 @@ mod tests {
             paths: vec!["~/projects".into()],
             command_patterns: vec![],
             approval_policy: "observe".into(),
-            quota: Quota { ttl_sec: 1, max_calls: 1, concurrency: 1 },
+            quota: Quota {
+                ttl_sec: 1,
+                max_calls: 1,
+                concurrency: 1,
+            },
         };
         assert!(path_allowed(&s, "~/projects-evil/../x"));
     }

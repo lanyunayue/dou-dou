@@ -554,7 +554,11 @@ fn check_remote_path(path: &str, home_dir: Option<&str>) -> Result<(), String> {
 /// 词法归一化挡不住「合法路径下的 symlink 指向墙外」——`/home/dou/link` 词法
 /// 完全合法，但它可能指向 /etc/shadow。远端 canonicalize 求出真实路径后，
 /// 对真实路径重跑同一套 check_remote_path。
-fn check_resolved_remote_path(requested: &str, resolved: &str, home_dir: Option<&str>) -> Result<(), String> {
+fn check_resolved_remote_path(
+    requested: &str,
+    resolved: &str,
+    home_dir: Option<&str>,
+) -> Result<(), String> {
     check_remote_path(resolved, home_dir)
         .map_err(|e| format!("symlink 解析后越界：{requested} → {resolved}：{e}"))
 }
@@ -1184,21 +1188,41 @@ mod tests {
     #[test]
     fn symlink_resolved_escape_is_blocked() {
         // 请求词法合法，但真实目标越界 → 拒
-        assert!(check_resolved_remote_path("/home/dou/link", "/etc/shadow", Some("/home/dou")).is_err());
-        assert!(check_resolved_remote_path("/home/dou/link", "/root/secret", Some("/home/dou")).is_err());
+        assert!(
+            check_resolved_remote_path("/home/dou/link", "/etc/shadow", Some("/home/dou")).is_err()
+        );
+        assert!(
+            check_resolved_remote_path("/home/dou/link", "/root/secret", Some("/home/dou"))
+                .is_err()
+        );
         assert!(check_resolved_remote_path("/tmp/x", "/etc/sudoers", Some("/home/dou")).is_err());
         // 真实目标是个私钥（无论落在哪）→ 拒
-        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/.ssh/id_ed25519", Some("/home/dou")).is_err());
+        assert!(check_resolved_remote_path(
+            "/home/dou/link",
+            "/home/dou/.ssh/id_ed25519",
+            Some("/home/dou")
+        )
+        .is_err());
         // 允许根外的一般路径 → 拒
-        assert!(check_resolved_remote_path("/home/dou/link", "/var/data/x", Some("/home/dou")).is_err());
+        assert!(
+            check_resolved_remote_path("/home/dou/link", "/var/data/x", Some("/home/dou")).is_err()
+        );
     }
 
     #[test]
     fn symlink_resolved_inside_root_is_allowed() {
-        assert!(check_resolved_remote_path("/home/dou/link", "/home/dou/data/train.log", Some("/home/dou")).is_ok());
+        assert!(check_resolved_remote_path(
+            "/home/dou/link",
+            "/home/dou/data/train.log",
+            Some("/home/dou")
+        )
+        .is_ok());
         assert!(check_resolved_remote_path("/tmp/x", "/tmp/note.txt", Some("/home/dou")).is_ok());
         // 允许根内的白名单文件
-        assert!(check_resolved_remote_path("/home/dou/link", "/etc/os-release", Some("/home/dou")).is_ok());
+        assert!(
+            check_resolved_remote_path("/home/dou/link", "/etc/os-release", Some("/home/dou"))
+                .is_ok()
+        );
     }
 
     #[test]

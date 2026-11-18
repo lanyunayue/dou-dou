@@ -163,7 +163,10 @@ mod tests {
     fn internal_ip_ranges_redacted_public_kept() {
         let s = Sanitizer::new();
         for ip in ["10.1.2.3", "192.168.1.10", "172.16.0.1", "172.31.9.9"] {
-            assert!(s.sanitize(ip).contains("[REDACTED:IP]"), "{ip} 属内网应遮蔽");
+            assert!(
+                s.sanitize(ip).contains("[REDACTED:IP]"),
+                "{ip} 属内网应遮蔽"
+            );
         }
         // 公网地址不在内网段，保留
         assert!(!s.sanitize("8.8.8.8").contains("[REDACTED:IP]"));
@@ -176,7 +179,8 @@ mod tests {
     #[test]
     fn mixed_secrets_cleaned_in_one_pass() {
         let s = Sanitizer::new();
-        let text = "host 10.0.0.5 uses Bearer zzz.zzz and AKIAIOSFODNN7EXAMPLE, see /root/.ssh/id_rsa";
+        let text =
+            "host 10.0.0.5 uses Bearer zzz.zzz and AKIAIOSFODNN7EXAMPLE, see /root/.ssh/id_rsa";
         let out = s.sanitize(text);
         assert!(!out.contains("10.0.0.5"));
         assert!(!out.contains("zzz.zzz"));
