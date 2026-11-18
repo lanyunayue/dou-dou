@@ -965,4 +965,31 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn b64_roundtrip_and_rejects_invalid() {
+        let raw = b"hello dou vault";
+        let enc = b64_encode(raw);
+        assert_eq!(b64_decode(&enc).unwrap(), raw);
+        assert!(b64_decode("!!!not-base64!!!").is_err());
+    }
+
+    #[test]
+    fn derive_key_deterministic_and_password_sensitive() {
+        let salt = b"0123456789abcdef";
+        let k1 = derive_key("master", salt, 1_000);
+        let k2 = derive_key("master", salt, 1_000);
+        assert_eq!(k1, k2);
+        assert_eq!(k1.len(), KEY_LEN);
+        // 主密码不同必须派生不同密钥
+        assert_ne!(k1, derive_key("other", salt, 1_000));
+    }
+
+    #[test]
+    fn aes_decrypt_rejects_bad_nonce_length() {
+        let key = derive_key("master", b"0123456789abcdef", 1_000);
+        let (ct, _nonce) = aes_encrypt(&key, b"plaintext").unwrap();
+        // nonce 不是 12 字节必须报错，不 panic
+        assert!(aes_decrypt(&key, &ct, b"short").is_err());
+    }
 }
