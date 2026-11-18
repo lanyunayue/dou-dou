@@ -293,4 +293,70 @@ MemAvailable:   2048000 kB
         let bad = "cpu  1 2 3 4 5\ncpu  2 3 4 5 6\n  eth0: 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n";
         assert!(parse_sample(bad).is_err());
     }
+
+    #[test]
+    fn parse_sample_idle_cpu_is_zero() {
+        let idle = "\
+cpu  100 0 100 800 0 0 0 0 0 0
+cpu  100 0 100 800 0 0 0 0 0 0
+MemTotal:       4096000 kB
+MemAvailable:   2048000 kB
+  eth0: 1048576 100 0 0 0 0 0 0 524288 50 0 0 0 0 0 0
+12345.67 23456.78
+";
+        let (s, _, _) = parse_sample(idle).expect("空闲样本应可解析");
+        assert!((s.cpu_pct - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_sample_missing_net_errors() {
+        let bad = "\
+cpu  1 2 3 4 5
+cpu  2 3 4 5 6
+MemTotal:       1000 kB
+MemAvailable:   500 kB
+100.0 1.0
+";
+        assert!(parse_sample(bad).is_err(), "无 /proc/net/dev 行应报错");
+    }
+
+    #[test]
+    fn parse_sample_multi_nic_sums_rx_tx() {
+        let multi = "\
+cpu  100 0 100 800 0 0 0 0 0 0
+cpu  200 0 100 800 0 0 0 0 0 0
+MemTotal:       4096000 kB
+MemAvailable:   2048000 kB
+  eth0: 1000 10 0 0 0 0 0 0 2000 20 0 0 0 0 0 0
+  eth1: 3000 30 0 0 0 0 0 0 4000 40 0 0 0 0 0 0
+  lo: 9999 1 0 0 0 0 0 0 9999 1 0 0 0 0 0 0
+12345.67 23456.78
+";
+        let (_, rx, tx) = parse_sample(multi).expect("多网卡样本应可解析");
+        assert_eq!(rx, 4000);
+        assert_eq!(tx, 6000);
+    }
+
+    #[test]
+    fn parse_sample_avail_over_total_used_saturates() {
+        // MemAvailable 大于 MemTotal 时已用内存不得下溢成超大数
+        let weird = "\
+cpu  1 2 3 4 5
+cpu  2 3 4 5 6
+MemTotal:       1000 kB
+MemAvailable:   2000 kB
+  eth0: 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+100.0 1.0
+";
+        let (s, _, _) = parse_sample(weird).expect("样本应可解析");
+        assert_eq!(s.mem_used_mb, 0);
+    }
+
+    #[test]
+    fn parse_cpu_line_skips_non_numeric() {
+        // 非数值字段被过滤；字段足够时仍可解析，idle 取第 4、5 个数值
+        let (idle, total) = parse_cpu_line("cpu  10 20 30 40 5 abc").expect("应可解析");
+        assert_eq!(idle, 45);
+        assert_eq!(total, 105);
+    }
 }
