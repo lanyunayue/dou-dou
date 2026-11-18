@@ -68,16 +68,14 @@ export async function downloadCwd() {
 export const dragActive = ref(false)
 
 function enqueueUploads(paths: string[]) {
-  const args = sshArgs()
-  if (!args) { notify('尚未连接远程主机：请先在终端新建连接'); return }
+  if (!sshArgs()) { notify('尚未连接远程主机：请先在终端新建连接'); return }
   const files = paths.filter(p => baseName(p))
   if (!files.length) { notify('未检测到可上传的文件（暂不支持拖拽目录，目录请用传输队列同步）'); return }
-  let failed = 0
   for (const local of files) {
     const name = baseName(local)
     const remote = joinRemote(cwd.value, name)
     invoke('tq_enqueue', { kind: 'upload', label: `上传 ${name}`, remote, local })
-      .catch((e) => { failed++; notify('「' + name + '」入队失败：' + sshOfflineReason(e)) })
+      .catch((e) => { notify('「' + name + '」入队失败：' + sshOfflineReason(e)) })
   }
   notify(`已将 ${files.length} 个文件加入上传队列（目标目录 ${cwd.value}）；可在「传输队列」查看进度`)
   void loadTq()
