@@ -143,3 +143,59 @@ pub fn record(
 pub fn probe_command() -> &'static str {
     "pwd; echo ---; ps -o pid= -p $$ 2>/dev/null; echo ---; nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader 2>/dev/null || echo 'no-gpu'"
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_is_stable_for_same_command() {
+        let c = "python train.py --lr 0.01 data/a";
+        let a = fingerprint(c);
+        let b = fingerprint(c);
+        assert_eq!(a.0, b.0);
+        assert_eq!(a.1, b.1);
+    }
+
+    #[test]
+    fn fingerprint_differs_with_dataset_path() {
+        let a = fingerprint("python train.py data/a");
+        let b = fingerprint("python train.py data/b");
+        assert_ne!(a.0, b.0);
+    }
+
+    #[test]
+    fn normalize_args_drops_options_and_command_then_sorts() {
+        // 既有实现只去掉 `-` 开头的选项本身，选项值（0.01）保留参与排序。
+        let args = normalize_args("python train.py --lr 0.01 data/b data/a");
+        assert_eq!(args, "0.01 data/a data/b train.py");
+    }
+
+    #[test]
+    fn extract_dataset_path_picks_last_path_token() {
+        assert_eq!(
+            extract_dataset_path("python train.py data/a ./out"),
+            "./out"
+        );
+        assert_eq!(extract_dataset_path("ls -la"), "");
+    }
+
+    #[test]
+    fn probe_output_parses_cwd_pid_gpu() {
+        let ctx = Context::from_probe_output(
+            "/home/u\n---\n1234 python3 app.py\n---\n800MiB, 12%",
+            "tail",
+        );
+        assert_eq!(ctx.cwd, "/home/u");
+        assert_eq!(ctx.pid, "1234");
+        assert_eq!(ctx.gpu, "800MiB, 12%");
+        assert_eq!(ctx.log_tail, "tail");
+    }
+
+    #[test]
+    fn log_tail_is_capped_to_400_chars() {
+        let long = "x".repeat(500);
+        let ctx = Context::from_probe_output("/\n---\n1 ---\nno-gpu", &long);
+        assert_eq!(ctx.log_tail.len(), 400);
+    }
+}
