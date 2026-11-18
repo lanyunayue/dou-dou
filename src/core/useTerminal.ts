@@ -6,9 +6,11 @@ import { sendNotification } from '@tauri-apps/plugin-notification'
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
+import { SearchAddon } from 'xterm-addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { activeTarget, SSH_KEY, sshError, audit, handleSshFailure, type SshTarget } from './useSsh'
 import { notify } from '../shared/feedback'
+import { nextTabSid, prevTabSid } from '../shared/tabNav'
 import type { TerminalTab, SessionMeta } from '../shared/types'
 
 // 终端状态：多会话标签 / 当前会话 / 检索 / 广播
@@ -97,11 +99,13 @@ function onTermContextMenu(ev: MouseEvent) {
   termCtxMenu.value = { visible: true, x, y }
 }
 
-// 每会话独立的 xterm 实例（fit 插件随标签保存，切换显示时按容器重排）
-function createTerm(): { term: Terminal; fit: FitAddon } {
+// 每会话独立的 xterm 实例（fit / search 插件随标签保存，切换显示时按容器重排）
+function createTerm(): { term: Terminal; fit: FitAddon; search: SearchAddon } {
   const term = new Terminal({ fontSize: 13, convertEol: true })
   const fit = new FitAddon()
   term.loadAddon(fit)
+  const search = new SearchAddon()
+  term.loadAddon(search)
   term.open(termEl.value!)
   try { fit.fit() } catch { /* 容器未就绪时跳过，切换标签时再 fit */ }
   // F-05：优先 WebGL，初始化失败自动回退 Canvas（渲染器回退，非连接错误）
@@ -124,7 +128,7 @@ function createTerm(): { term: Terminal; fit: FitAddon } {
     termEl.value.addEventListener('contextmenu', onTermContextMenu)
     ctxMenuBoundEl = termEl.value
   }
-  return { term, fit }
+  return { term, fit, search }
 }
 
 // R13 右键菜单动作：作用于当前活动会话，动作后关闭菜单
@@ -186,11 +190,11 @@ export async function connectSsh(o: ConnectOptions) {
 // 会话落地共用件：创建 xterm、写欢迎行、注册键盘写入、入 tabs（连接表单/档案连接/本地 Shell 共用）
 // R4：fit 产生的 resize 一律上报 pty_resize（ConPTY 会话同步尺寸，其余模式 Rust 侧 no-op）
 function attachSession(sid: string, title: string, welcome: string, extra?: Partial<TerminalTab>) {
-  const { term, fit } = createTerm()
+  const { term, fit, search } = createTerm()
   term.write(welcome)
   term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
   term.onResize(({ cols, rows }) => { void invoke('pty_resize', { sid, cols, rows }).catch(()=>{}) })
-  tabs.value.push({ sid, title, term, fit, ...extra })
+  tabs.value.push({ sid, title, term, fit, search, ...extra })
   activeSid.value = sid
   showConnectForm.value = false
   showActiveTerm()
@@ -277,6 +281,51 @@ export function closeTab(sid: string) {
   if (activeSid.value === sid && tabs.value.length) switchTab(tabs.value[0].sid)
   else showActiveTerm()
   persistSessionMeta()
+}
+
+// R15 标签快捷键：Ctrl+Tab 下一个 / Ctrl+Shift+Tab 上一个 / Ctrl+W 关闭当前。
+// 导航为环形；无标签时动作空转。
+export function nextTab() {
+  const n = nextTabSid(tabs.value.map(t => t.sid), activeSid.value)
+  if (n) switchTab(n)
+}
+
+export function prevTab() {
+  const n = prevTabSid(tabs.value.map(t => t.sid), activeSid.value)
+  if (n) switchTab(n)
+}
+
+export function closeActiveTab() {
+  if (activeSid.value) closeTab(activeSid.value)
+}
+
+// R14 终端查找：查找条可见性 + 查询词，作用于当前活动标签的 search 插件。
+// 第一版用选区定位当前匹配（不挂全量装饰色）；默认忽略大小写、非正则。
+export const searchVisible = ref(false)
+export const searchQuery = ref('')
+
+function activeSearch(): SearchAddon | undefined {
+  return tabs.value.find(x => x.sid === activeSid.value)?.search
+}
+
+export function openSearch() { searchVisible.value = true }
+
+export function closeSearch() {
+  searchVisible.value = false
+  searchQuery.value = ''
+  activeSearch()?.clearDecorations()
+}
+
+export function findNextMatch() {
+  const q = searchQuery.value
+  if (!q) return
+  activeSearch()?.findNext(q, { caseSensitive: false })
+}
+
+export function findPrevMatch() {
+  const q = searchQuery.value
+  if (!q) return
+  activeSearch()?.findPrevious(q, { caseSensitive: false })
 }
 
 // R11：一键恢复上次会话。本地 Shell 直接重开；密钥认证档案按存档参数重连；
@@ -383,6 +432,15 @@ export function useTerminal() {
     openLocalTab,
     switchTab,
     closeTab,
+    nextTab,
+    prevTab,
+    closeActiveTab,
+    searchVisible,
+    searchQuery,
+    openSearch,
+    closeSearch,
+    findNextMatch,
+    findPrevMatch,
     cleanExport,
     exportTerm,
     doBroadcast,
