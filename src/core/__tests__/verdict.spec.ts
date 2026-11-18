@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { verdictTone } from '../../shared/verdict'
+import { verdictTone, verdictClass } from '../../shared/verdict'
 
 describe('verdictTone 放行类', () => {
   it('auto 只读自动放行归绿', () => expect(verdictTone('auto')).toBe('allow'))
@@ -33,5 +33,14 @@ describe('verdictTone 待审与未知', () => {
     expect(verdictTone('')).toBe('ask')
     expect(verdictTone(undefined)).toBe('ask')
     expect(verdictTone('nonsense')).toBe('ask')
+  })
+})
+
+describe('verdictClass CSS 类', () => {
+  it('放行类 → v-allow', () => expect(verdictClass('auto')).toBe('v-allow'))
+  it('拒绝类 → v-deny', () => expect(verdictClass('blocked')).toBe('v-deny'))
+  it('待审/未知/空 → v-ask', () => {
+    expect(verdictClass('pending_approval')).toBe('v-ask')
+    expect(verdictClass(undefined)).toBe('v-ask')
   })
 })

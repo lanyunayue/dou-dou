@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { gwFetch } from '../adapters/useGateway'
 import { notify } from '../shared/feedback'
-import { verdictTone } from '../shared/verdict'
+import { verdictClass } from '../shared/verdict'
 import { useRequestGuard } from '../core/useRequestGuard'
 import StateShell from './StateShell.vue'
 
@@ -103,11 +103,6 @@ function fmtTime(item: AuditItem): string {
   const n = Number(raw)
   if (!raw || !Number.isFinite(n) || n <= 0) return String(raw || '-')
   return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
-
-function verdictClass(v?: string): string {
-  const tone = verdictTone(v)
-  return tone === 'allow' ? 'v-allow' : tone === 'deny' ? 'v-deny' : 'v-ask'
 }
 
 const countText = computed(() => `共 ${items.value.length} 条（最多显示 300 条）`)

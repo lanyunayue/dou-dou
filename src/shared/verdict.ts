@@ -21,3 +21,9 @@ export function verdictTone(v?: string): VerdictTone {
   if (DENY.has(k)) return 'deny'
   return 'ask'
 }
+
+/** tone → 审计条目 CSS 类（allow 绿 / deny 红 / ask 琥珀）。 */
+export function verdictClass(v?: string): string {
+  const tone = verdictTone(v)
+  return tone === 'allow' ? 'v-allow' : tone === 'deny' ? 'v-deny' : 'v-ask'
+}
