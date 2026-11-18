@@ -687,6 +687,17 @@ mod tests {
         assert!(ensure_unlocked(true).is_ok());
     }
 
+    #[test]
+    fn load_err_msg_distinguishes_not_found_and_corrupt() {
+        let p = Path::new(r"C:\dou\vault.json");
+        let nf = load_err_msg(p, &VaultLoadError::NotFound);
+        assert!(nf.contains("未初始化"));
+        let corrupt = load_err_msg(p, &VaultLoadError::Corrupt("bad json".into()));
+        assert!(corrupt.contains("损坏"));
+        assert!(corrupt.contains("vault.json"));
+        assert!(corrupt.contains("bad json"));
+    }
+
     /// P0-1 回归：锁定时不能读到目标档案，解锁后可以。
     #[test]
     fn vault_list_targets_is_blocked_while_locked() {
