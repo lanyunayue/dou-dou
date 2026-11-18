@@ -357,6 +357,19 @@ root     tty1     -                08:00    3.00  1.00s  0.10s /sbin/init
     }
 
     #[test]
+    fn split_host_port_parses_and_rejects_malformed() {
+        assert_eq!(
+            split_host_port("127.0.0.1:22"),
+            Some(("127.0.0.1".into(), 22))
+        );
+        // IPv6 括号被剥离
+        assert_eq!(split_host_port("[::1]:22"), Some(("::1".into(), 22)));
+        // 无冒号 / 非法端口回落 None
+        assert!(split_host_port("127.0.0.1").is_none());
+        assert!(split_host_port("host:abc").is_none());
+    }
+
+    #[test]
     fn parse_df_clamps_over_100() {
         let rows = parse_df("/dev/sda1  40G  38G  1.0G 150% /overflow\n");
         assert_eq!(rows.len(), 1);
