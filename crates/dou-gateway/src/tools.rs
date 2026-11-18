@@ -1235,4 +1235,35 @@ mod tests {
         assert!(lexical_parent("/").is_none());
         assert_eq!(lexical_parent("/tmp/dir/").as_deref(), Some("/tmp"));
     }
+
+    #[test]
+    fn truncate_short_text_is_returned_as_is() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("", 5), "");
+    }
+
+    #[test]
+    fn truncate_long_text_marks_total_char_count() {
+        let out = truncate("0123456789", 4);
+        assert!(out.starts_with("0123"));
+        assert!(out.contains("10 chars total"));
+    }
+
+    #[test]
+    fn truncate_counts_unicode_chars_not_bytes() {
+        // 6 个中文字符，max=3：按字符截，不截断多字节序列
+        let out = truncate("你好世界测试", 3);
+        assert!(out.starts_with("你好世"));
+        assert!(out.contains("6 chars total"));
+    }
+
+    #[test]
+    fn text_result_passes_text_and_error_flag() {
+        let ok = text_result("ok", false);
+        assert_eq!(ok["isError"], false);
+        assert_eq!(ok["content"][0]["text"], "ok");
+        let err = text_result("boom", true);
+        assert_eq!(err["isError"], true);
+        assert_eq!(err["content"][0]["text"], "boom");
+    }
 }
