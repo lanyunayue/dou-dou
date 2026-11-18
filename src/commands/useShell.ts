@@ -2,12 +2,10 @@ import { tabs, activeSid } from '../core/useTerminal'
 import { cwd } from '../core/useFileTree'
 import { notify } from '../shared/feedback'
 import { parseMobaSessions } from '../shared/mobaImport'
+import { hash8 } from '../shared/hash'
 
 // ---------- 侧边栏动作：快照 / 导入 MobaXterm ----------
-export async function hash8(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
-  return Array.from(new Uint8Array(buf)).slice(0,4).map(b=>b.toString(16).padStart(2,'0')).join('')
-}
+export { hash8 }
 
 export async function snapshot() {
   const t = tabs.value.find(x=>x.sid===activeSid.value)
