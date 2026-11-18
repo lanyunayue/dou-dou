@@ -312,4 +312,30 @@ mod tests {
     fn query_missing_file_returns_empty() {
         assert!(query(&temp_path(), None, None, None, 10).is_empty());
     }
+
+    #[test]
+    fn event_passes_fields_and_has_trace() {
+        let e = event("agent", "exec", "/x", "allowed", json!({ "k": "v" }));
+        assert_eq!(e["source"], "agent");
+        assert_eq!(e["action"], "exec");
+        assert_eq!(e["target"], "/x");
+        assert_eq!(e["verdict"], "allowed");
+        assert_eq!(e["detail"]["k"], "v");
+        assert!(!e["trace_id"].as_str().unwrap().is_empty());
+        // ts_ms 是毫秒量级字符串
+        let ms: i64 = e["ts_ms"].as_str().unwrap().parse().unwrap();
+        assert!(ms > 1_000_000_000_000);
+    }
+
+    #[test]
+    fn sha256_hex_known_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 }
