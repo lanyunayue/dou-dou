@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { GwErrorInfo, GatewayStatus } from '../shared/types'
+import { summarizeConn } from '../shared/connSummary'
 
 // 网关地址固定由 Rust 侧 `gateway_request` 使用 http://127.0.0.1:7419，
 // 前端不再直连 fetch（WebView 跨域 CORS 会挡住响应读取）。
@@ -85,15 +86,9 @@ export async function replaceTokenPlaceholder(snippet: string): Promise<string> 
 }
 
 // 状态灯分层：/health 探活成功 ≠ 所有功能可用（探活 / 鉴权 / 远程主机三层单一真源）
-export const connSummary = computed(() => {
-  if (!status.value.running) return '网关未就绪 · HTTP 管理功能不可用'
-  if (gwError.value) return `网关在线 · ${gwError.value.message}`
-  // 以 Rust 侧对 SSH 端口的真实探测为准，绝不因「没报过错」就写已连接。
-  const ssh = status.value.ssh_up
-    ? '远程主机已连接（终端/文件/传输可用）'
-    : '远程主机未连接（终端/文件/传输暂不可用）'
-  return `网关在线（HTTP 管理可用）· ${ssh}`
-})
+export const connSummary = computed(() =>
+  summarizeConn(status.value.running, status.value.ssh_up, gwError.value),
+)
 
 export async function refresh() { status.value = await invoke('gateway_status') }
 
