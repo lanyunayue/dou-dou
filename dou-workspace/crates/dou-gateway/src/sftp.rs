@@ -58,9 +58,16 @@ impl SshConnection {
     /// 对 symlink 链一路解析到最终目标；目标不存在时返回 Err。
     pub async fn remote_realpath(&mut self, path: &str) -> Result<String, String> {
         let sftp = self.open_sftp().await?;
-        sftp.canonicalize(path)
+        let resolved = sftp
+            .canonicalize(path)
             .await
-            .map_err(|e| format!("realpath {path}: {e}"))
+            .map_err(|e| format!("realpath {path}: {e}"))?;
+        // 个别受限 shell 对空路径回空条目；归一化为当前目录，交由上层再探测。
+        if resolved.trim().is_empty() {
+            Ok(".".to_string())
+        } else {
+            Ok(resolved)
+        }
     }
 
     /// B3：lstat（不跟随末级 symlink）。Ok(None) = 目标不存在。
@@ -191,4 +198,43 @@ pub fn quarantine_dir() -> PathBuf {
     std::env::var("LOCALAPPDATA")
         .map(|p| PathBuf::from(p).join("dou").join("quarantine"))
         .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_warning_flags_sensitive_prefixes() {
+        assert!(path_warning("/etc/shadow").is_some());
+        assert!(path_warning("/etc/sudoers.d/99-admin").is_some());
+        assert!(path_warning("/root/.ssh/id_rsa").is_some());
+        assert!(path_warning("/var/log/auth.log").is_some());
+        // 普通用户文件与非敏感系统文件不告警
+        assert!(path_warning("/home/dou/a.txt").is_none());
+        assert!(path_warning("/etc/hosts").is_none());
+    }
+
+    #[test]
+    fn sha256_hex_is_stable_and_64_hex() {
+        let a = sha256_hex(b"hello");
+        let b = sha256_hex(b"hello");
+        let c = sha256_hex(b"hellp");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|ch| ch.is_ascii_hexdigit()));
+        // 空串摘要与已知 sha256 一致
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn quarantine_dir_falls_back_to_cwd() {
+        // 不依赖环境变量是否存在：只校验返回路径末尾拼了 quarantine
+        let dir = quarantine_dir();
+        assert_eq!(dir.file_name().and_then(|s| s.to_str()), Some("quarantine"));
+    }
 }

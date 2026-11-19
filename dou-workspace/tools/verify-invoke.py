@@ -22,14 +22,17 @@ for p in sorted(root.rglob("*")):
         for m in pat.finditer(txt):
             found.setdefault(m.group(1), []).append(f"{p.name}:{txt[:m.start()].count(chr(10))+1}")
 
-# 基线 24 条：11-13 前端重构新增的保险库命令族，R8(c81c8aa) 起「自测连接」
-# 入口被真会话连接（connectByTarget）取代，vault_test_connect 移出前端基线；
-# Rust 侧保留该命令仅为兼容，不在前端基线内。
+# 基线：前端实际 invoke() 调用集。R8(c81c8aa) 起「自测连接」入口被真会话连接
+# （connectByTarget）取代，vault_test_connect 移出前端基线；Rust 侧保留仅为兼容。
+# 2026-11-18 补：open_local_pty / pty_resize / vault_status 为历史既有前端调用；
+# vault_export / vault_import 为档案换机迁移命令。
+# 2026-11-19 补：close_pty（PTY 关闭）、remote_read / remote_write（A4 编辑器读写）。
 # 注：generate_handler![] 注册数与前端基线条数口径不同，部分命令前端不直接调用。
 base = set("""gateway_request gateway_status gateway_token host_key_forget host_key_list
-open_pty pty_write remote_stat sftp_download sftp_list sync_folders tq_cancel tq_clear
-tq_enqueue tq_list tq_pause tq_resume vault_add_target vault_get_key vault_init
-vault_list_targets vault_lock vault_remove_target vault_unlock""".split())
+open_local_pty open_pty pty_resize pty_write close_pty remote_read remote_write remote_stat sftp_download sftp_list
+sync_folders tq_cancel tq_clear tq_enqueue tq_list tq_pause tq_resume
+vault_add_target vault_export vault_get_key vault_import vault_init
+vault_list_targets vault_lock vault_remove_target vault_status vault_unlock""".split())
 
 cur = set(found)
 print(f"扫描目录: {root.resolve()}")

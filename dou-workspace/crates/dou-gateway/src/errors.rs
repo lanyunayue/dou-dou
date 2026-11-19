@@ -74,3 +74,59 @@ pub fn to_json(raw: &str) -> serde_json::Value {
         "raw": raw,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_known_hosts_corrupt() {
+        assert_eq!(
+            classify("known_hosts 文件损坏").code,
+            "E_KNOWN_HOSTS_CORRUPT"
+        );
+    }
+
+    #[test]
+    fn classifies_hostkey_mismatch() {
+        assert_eq!(classify("主机密钥不匹配").code, "E_HOSTKEY_MISMATCH");
+    }
+
+    #[test]
+    fn classifies_connection_refused_variants() {
+        assert_eq!(classify("os error 10061").code, "E_CONN_REFUSED");
+        assert_eq!(classify("Connection refused").code, "E_CONN_REFUSED");
+        assert_eq!(classify("积极拒绝").code, "E_CONN_REFUSED");
+    }
+
+    #[test]
+    fn classifies_timeout_variants() {
+        assert_eq!(classify("Connection timed out").code, "E_CONN_TIMEOUT");
+        assert_eq!(classify("连接超时").code, "E_CONN_TIMEOUT");
+        assert_eq!(classify("operation timeout").code, "E_CONN_TIMEOUT");
+    }
+
+    #[test]
+    fn classifies_auth_and_key_and_algo() {
+        assert_eq!(classify("authentication rejected").code, "E_AUTH_FAILED");
+        assert_eq!(classify("load private key failed").code, "E_KEY_LOAD");
+        assert_eq!(classify("unknown key type").code, "E_UNSUPPORTED_ALGO");
+        assert_eq!(classify("unsupported algorithm").code, "E_UNSUPPORTED_ALGO");
+    }
+
+    #[test]
+    fn unknown_falls_back_and_keeps_raw() {
+        let info = classify("some weird ssh failure");
+        assert_eq!(info.code, "E_SSH_UNKNOWN");
+        assert!(info.human.contains("some weird ssh failure"));
+    }
+
+    #[test]
+    fn to_json_carries_status_code_message_raw() {
+        let v = to_json("os error 10061");
+        assert_eq!(v["status"], "error");
+        assert_eq!(v["code"], "E_CONN_REFUSED");
+        assert_eq!(v["raw"], "os error 10061");
+        assert!(v["message"].as_str().unwrap().contains("拒绝连接"));
+    }
+}

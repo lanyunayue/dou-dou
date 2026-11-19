@@ -67,3 +67,62 @@ fn build(status: StatusCode, payload: Value, session: Option<&str>) -> Response 
         .body(Body::from(body))
         .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn body_json(resp: Response) -> Value {
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    }
+
+    #[tokio::test]
+    async fn ok_passes_id_result_and_session_header() {
+        let resp = ok(json!(42), json!({"hello": "world"}), Some("sess-1"));
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("mcp-session-id").unwrap(), "sess-1");
+        let v = body_json(resp).await;
+        assert_eq!(v["jsonrpc"], "2.0");
+        assert_eq!(v["id"], 42);
+        assert_eq!(v["result"]["hello"], "world");
+    }
+
+    #[tokio::test]
+    async fn err_wraps_code_message_keeps_id() {
+        let resp = err(json!(7), -32000, "boom", None);
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get("mcp-session-id").is_none());
+        let v = body_json(resp).await;
+        assert_eq!(v["jsonrpc"], "2.0");
+        assert_eq!(v["id"], 7);
+        assert_eq!(v["error"]["code"], -32000);
+        assert_eq!(v["error"]["message"], "boom");
+    }
+
+    #[tokio::test]
+    async fn http_err_uses_given_status_and_null_id() {
+        let resp = http_err(StatusCode::BAD_REQUEST, -32602, "invalid params");
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let v = body_json(resp).await;
+        assert_eq!(v["id"], Value::Null);
+        assert_eq!(v["error"]["code"], -32602);
+        assert_eq!(v["error"]["message"], "invalid params");
+    }
+
+    #[tokio::test]
+    async fn accepted_is_empty_202() {
+        let resp = accepted();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_session_id_header_is_omitted() {
+        // 含换行等非法字符时不写入头，避免构造 panic。
+        let resp = ok(json!(1), json!({}), Some("bad\r\nsid"));
+        assert!(resp.headers().get("mcp-session-id").is_none());
+    }
+}

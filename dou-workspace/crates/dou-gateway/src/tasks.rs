@@ -182,6 +182,7 @@ impl TaskHub {
     }
 
     /// 完整版创建：携带审批卡片四要素（目标路径 / 历史次数 / 预计影响）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_pending_with(
         &self,
         session: &str,
@@ -528,5 +529,39 @@ mod tests {
             let fresh = all.iter().find(|t| t.id == "fresh").unwrap();
             assert_eq!(fresh.status, TaskStatus::PendingApproval);
         });
+    }
+
+    #[test]
+    fn task_to_json_preserves_contract_fields() {
+        let t = Task {
+            id: "t-json".into(),
+            session: "s".into(),
+            command: "ls -la".into(),
+            status: TaskStatus::Done,
+            reason: "read-only".into(),
+            approver_note: "ok".into(),
+            remember: true,
+            policy: "observe".into(),
+            stdout: "out".into(),
+            stderr: "err".into(),
+            exit_code: Some(0),
+            created_ms: 1_700_000_000_000,
+            decided_ms: Some(2),
+            done_ms: Some(3),
+            target_path: "/a/b".into(),
+            history_count: 5,
+            impact: "read".into(),
+        };
+        let j = task_to_json(&t);
+        assert_eq!(j["id"], "t-json");
+        assert_eq!(j["command"], "ls -la");
+        assert_eq!(j["status"], "done");
+        assert_eq!(j["reason"], "read-only");
+        assert_eq!(j["impact"], "read");
+        assert_eq!(j["target_path"], "/a/b");
+        assert_eq!(j["history_count"], 5);
+        assert_eq!(j["policy"], "observe");
+        assert_eq!(j["exit_code"].as_i64(), Some(0));
+        assert_eq!(j["created_ms"].as_u64(), Some(1_700_000_000_000));
     }
 }

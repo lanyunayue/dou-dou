@@ -87,6 +87,9 @@ pub struct SshConnection {
     pub host_key: String,
     /// 本次是否为首次见到该主机
     pub host_key_first_seen: bool,
+    /// 远端真实家目录（SFTP REALPATH 解析）；解析失败时回退按用户名推断。
+    /// 路径作用域允许根以它为准，而不是写死 `/home/<user>`。
+    pub home_dir: String,
 }
 
 pub struct ExecOutcome {
@@ -154,6 +157,16 @@ fn take_host_key(state: &Arc<Mutex<HostKeyState>>) -> Result<(String, bool), Str
     Ok((line, st.first_seen))
 }
 
+/// 按用户名推断家目录：root → /root，其余 → /home/<user>。
+/// 仅作为 SFTP REALPATH 解析失败时的回退。
+fn infer_home(user: &str) -> String {
+    if user == "root" {
+        "/root".to_string()
+    } else {
+        format!("/home/{user}")
+    }
+}
+
 /// 口令认证。只用于临时联调，正式版默认关闭口令、强制密钥。
 pub async fn connect_password(
     host: &str,
@@ -172,7 +185,7 @@ pub async fn connect_password(
     if !auth.success() {
         return Err("ssh authentication rejected (password)".to_string());
     }
-    Ok(SshConnection {
+    let mut conn = SshConnection {
         handle,
         host: host.to_string(),
         port,
@@ -180,7 +193,10 @@ pub async fn connect_password(
         auth_method: "password",
         host_key,
         host_key_first_seen: first_seen,
-    })
+        home_dir: infer_home(user),
+    };
+    conn.resolve_home().await;
+    Ok(conn)
 }
 
 /// 密钥认证。私钥在网关本地读取，MCP 侧无法获得。
@@ -230,7 +246,7 @@ async fn finish_key_connect(
     if !auth.success() {
         return Err("ssh authentication rejected (publickey)".to_string());
     }
-    Ok(SshConnection {
+    let mut conn = SshConnection {
         handle,
         host: host.to_string(),
         port,
@@ -238,10 +254,46 @@ async fn finish_key_connect(
         auth_method: "publickey",
         host_key,
         host_key_first_seen: first_seen,
-    })
+        home_dir: infer_home(user),
+    };
+    conn.resolve_home().await;
+    Ok(conn)
 }
 
 impl SshConnection {
+    /// 连接后解析远端真实家目录：SFTP REALPATH 空串即当前工作目录（通常=$HOME）。
+    /// 失败不阻断连接，保留按用户名推断的回退值（fail-closed 方向不变：
+    /// 作用域仍按家目录收紧，不会因为解析失败而放开根目录）。
+    /// 归一化家目录：去首尾空白与末尾斜杠；根 `/` 保留为 `/`。
+    fn normalize_home(raw: &str) -> String {
+        let t = raw.trim();
+        match t {
+            "" | "." => String::new(),
+            "/" => "/".to_string(),
+            _ => t.trim_end_matches('/').to_string(),
+        }
+    }
+
+    async fn resolve_home(&mut self) {
+        // 第一步：SFTP REALPATH 空串/当前目录（协议级，无 shell 注入面）。
+        for probe in ["", "."] {
+            if let Ok(home) = self.remote_realpath(probe).await {
+                let home = Self::normalize_home(&home);
+                if !home.is_empty() {
+                    self.home_dir = home;
+                    return;
+                }
+            }
+        }
+        // 第二步：个别受限 shell 的 SFTP REALPATH 不可靠，退回只读 `pwd` 取当前目录。
+        if let Ok(out) = self.exec("pwd", Duration::from_secs(10)).await {
+            let home = Self::normalize_home(&out.stdout);
+            if !home.is_empty() {
+                self.home_dir = home;
+            }
+        }
+    }
+
     /// 执行一条非交互命令。超时后不再等待，但远端进程会继续跑——
     /// 这正是计划书 4.9 要求"长命令任务化"的原因，此处先如实暴露。
     pub async fn exec(&mut self, command: &str, timeout: Duration) -> Result<ExecOutcome, String> {
@@ -286,5 +338,49 @@ impl SshConnection {
             stderr: String::from_utf8_lossy(&stderr).to_string(),
             timed_out,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_home_root_and_normal_user() {
+        assert_eq!(infer_home("root"), "/root");
+        assert_eq!(infer_home("demo"), "/home/demo");
+    }
+
+    #[test]
+    fn rejection_reason_none_when_clean() {
+        let st = HostKeyState::default();
+        assert!(rejection_reason(&st).is_none());
+    }
+
+    #[test]
+    fn rejection_reason_corrupted_takes_priority() {
+        let mut st = HostKeyState::default();
+        st.corrupted = true;
+        st.rejected = true;
+        let reason = rejection_reason(&st).unwrap();
+        assert!(reason.contains("损坏"));
+    }
+
+    #[test]
+    fn rejection_reason_mismatch_lists_fingerprints() {
+        let mut st = HostKeyState::default();
+        st.rejected = true;
+        st.stored = Some("SHA256:abc".into());
+        st.line = Some("SHA256:def".into());
+        let reason = rejection_reason(&st).unwrap();
+        assert!(reason.contains("不匹配"));
+    }
+
+    #[test]
+    fn normalize_home_trims_and_strips_trailing_slash() {
+        assert_eq!(SshConnection::normalize_home(""), "");
+        assert_eq!(SshConnection::normalize_home("."), "");
+        assert_eq!(SshConnection::normalize_home("/"), "/");
+        assert_eq!(SshConnection::normalize_home("  /home/dou/  "), "/home/dou");
     }
 }

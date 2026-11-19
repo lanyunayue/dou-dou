@@ -476,4 +476,28 @@ mod tests {
         assert!(*start_sec > 0);
         assert!(now_ms() / 1000 >= *start_sec as i64);
     }
+
+    #[test]
+    fn lease_expired_distinguishes_alive_dead_and_missing() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE lease_state (
+                session_id TEXT PRIMARY KEY, started_ms INTEGER NOT NULL, expires_ms INTEGER NOT NULL)",
+        )
+        .unwrap();
+        // 未过期租约
+        lease_start_on(&conn, "s_alive", 60_000);
+        // 已过期租约（直接注入历史行）
+        let past = now_ms() - 10_000;
+        conn
+            .execute(
+                "INSERT INTO lease_state (session_id, started_ms, expires_ms) VALUES ('s_dead', ?1, ?2)",
+                rusqlite::params![past - 30_000, past],
+            )
+            .unwrap();
+        assert!(!lease_expired_on(&conn, "s_alive"));
+        assert!(lease_expired_on(&conn, "s_dead"));
+        // 不存在的会话：不判过期（fail-closed）
+        assert!(!lease_expired_on(&conn, "s_missing"));
+    }
 }

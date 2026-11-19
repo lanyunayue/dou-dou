@@ -4,7 +4,7 @@
 //!   1. 命令内容哈希
 //!   2. 参数规范化串哈希（去空白、排序后的参数）
 //!   3. 数据集路径哈希（命令中出现的路径参数）
-//! 三段拼接后再做一次 sha256，作为快照指纹；同一脚本换数据集视为不同实验。
+//!      三段拼接后再做一次 sha256，作为快照指纹；同一脚本换数据集视为不同实验。
 //!
 //! 被动采集：命令原文、工作目录、进程号、GPU 占用、日志尾部；不要求用户改脚本。
 
@@ -24,10 +24,9 @@ fn extract_dataset_path(cmd: &str) -> String {
     let tokens: Vec<&str> = cmd.split_whitespace().collect();
     tokens
         .iter()
-        .filter(|t| {
+        .rfind(|t| {
             t.starts_with('/') || t.starts_with("./") || t.starts_with("../") || t.contains('/')
         })
-        .last()
         .copied()
         .unwrap_or("")
         .to_string()
@@ -143,4 +142,74 @@ pub fn record(
 /// 补采命令：cwd / pid / GPU。在远端执行一次，结果交给 Context::from_probe_output。
 pub fn probe_command() -> &'static str {
     "pwd; echo ---; ps -o pid= -p $$ 2>/dev/null; echo ---; nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader 2>/dev/null || echo 'no-gpu'"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_is_stable_for_same_command() {
+        let c = "python train.py --lr 0.01 data/a";
+        let a = fingerprint(c);
+        let b = fingerprint(c);
+        assert_eq!(a.0, b.0);
+        assert_eq!(a.1, b.1);
+    }
+
+    #[test]
+    fn fingerprint_differs_with_dataset_path() {
+        let a = fingerprint("python train.py data/a");
+        let b = fingerprint("python train.py data/b");
+        assert_ne!(a.0, b.0);
+    }
+
+    #[test]
+    fn normalize_args_drops_options_and_command_then_sorts() {
+        // 既有实现只去掉 `-` 开头的选项本身，选项值（0.01）保留参与排序。
+        let args = normalize_args("python train.py --lr 0.01 data/b data/a");
+        assert_eq!(args, "0.01 data/a data/b train.py");
+    }
+
+    #[test]
+    fn extract_dataset_path_picks_last_path_token() {
+        assert_eq!(
+            extract_dataset_path("python train.py data/a ./out"),
+            "./out"
+        );
+        assert_eq!(extract_dataset_path("ls -la"), "");
+    }
+
+    #[test]
+    fn probe_output_parses_cwd_pid_gpu() {
+        let ctx = Context::from_probe_output(
+            "/home/u\n---\n1234 python3 app.py\n---\n800MiB, 12%",
+            "tail",
+        );
+        assert_eq!(ctx.cwd, "/home/u");
+        assert_eq!(ctx.pid, "1234");
+        assert_eq!(ctx.gpu, "800MiB, 12%");
+        assert_eq!(ctx.log_tail, "tail");
+    }
+
+    #[test]
+    fn log_tail_is_capped_to_400_chars() {
+        let long = "x".repeat(500);
+        let ctx = Context::from_probe_output("/\n---\n1 ---\nno-gpu", &long);
+        assert_eq!(ctx.log_tail.len(), 400);
+    }
+
+    #[test]
+    fn probe_output_missing_segments_do_not_panic() {
+        let empty = Context::from_probe_output("", "");
+        assert_eq!(empty.cwd, "");
+        assert_eq!(empty.pid, "");
+        assert_eq!(empty.gpu, "");
+        assert_eq!(empty.log_tail, "");
+        // 只有 cwd 段，其余段缺失回落空串
+        let partial = Context::from_probe_output("/only-cwd", "t");
+        assert_eq!(partial.cwd, "/only-cwd");
+        assert_eq!(partial.pid, "");
+        assert_eq!(partial.gpu, "");
+    }
 }

@@ -205,6 +205,7 @@ pub async fn require_auth(State(st): State<AppState>, mut req: Request, next: Ne
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
 
     #[test]
     fn exemption_list_is_minimal() {
@@ -237,5 +238,25 @@ mod tests {
     fn mcp_and_health_are_not_m_only() {
         assert!(!M_ONLY_PATHS.contains(&"/mcp"));
         assert!(!M_ONLY_PATHS.contains(&"/health"));
+    }
+
+    #[tokio::test]
+    async fn mcp_unauthorized_is_401_jsonrpc_error() {
+        let resp = mcp_unauthorized();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"]["code"], -32001);
+        assert!(v["error"]["message"].as_str().unwrap().contains("bearer"));
+    }
+
+    #[tokio::test]
+    async fn json_status_passes_code_and_message() {
+        let resp = json_status(StatusCode::FORBIDDEN, "E_DENIED", "no permission");
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"], "E_DENIED");
+        assert_eq!(v["message"], "no permission");
     }
 }

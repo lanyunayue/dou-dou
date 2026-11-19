@@ -19,7 +19,7 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use pbkdf2::pbkdf2_hmac;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 /// PBKDF2 迭代次数：210k ≈ OWASP 2023 对 PBKDF2-HMAC-SHA256 的建议量级。
 /// 解锁一次约 0.1~0.2s，属可接受的一次性代价。
@@ -48,7 +48,7 @@ fn hex_val(c: u8) -> Result<u8, String> {
 
 fn from_hex(s: &str) -> Result<Vec<u8>, String> {
     let b = s.as_bytes();
-    if b.len() % 2 != 0 {
+    if !b.len().is_multiple_of(2) {
         return Err("hex 长度为奇数".into());
     }
     let mut out = Vec::with_capacity(b.len() / 2);
@@ -72,8 +72,9 @@ pub fn seal(plaintext: &[u8], kek: &[u8; 32]) -> Result<String, String> {
     let cipher = Aes256Gcm::new_from_slice(kek).map_err(|e| format!("KEK 长度异常: {e}"))?;
     let mut nb = [0u8; NONCE_LEN];
     getrandom::fill(&mut nb).map_err(|e| format!("CSPRNG 不可用: {e}"))?;
+    let nonce = Nonce::try_from(nb.as_slice()).map_err(|_| "加密失败".to_string())?;
     let ct = cipher
-        .encrypt(Nonce::from_slice(&nb), plaintext)
+        .encrypt(&nonce, plaintext)
         .map_err(|_| "加密失败".to_string())?;
     let mut blob = nb.to_vec();
     blob.extend_from_slice(&ct);
@@ -88,8 +89,9 @@ pub fn unseal(blob_hex: &str, kek: &[u8; 32]) -> Result<Vec<u8>, String> {
     }
     let cipher = Aes256Gcm::new_from_slice(kek).map_err(|e| format!("KEK 长度异常: {e}"))?;
     let (nb, ct) = blob.split_at(NONCE_LEN);
+    let nonce = Nonce::try_from(nb).map_err(|_| "解密失败：密文损坏或口令不正确".to_string())?;
     cipher
-        .decrypt(Nonce::from_slice(nb), ct)
+        .decrypt(&nonce, ct)
         .map_err(|_| "解密失败：密文损坏或口令不正确".to_string())
 }
 
@@ -398,5 +400,32 @@ mod tests {
             .execute("INSERT INTO vault_meta VALUES ('kek_salt','00112233')", [])
             .unwrap();
         assert!(unlock_on(&conn2, "correct-passphrase").is_err());
+    }
+
+    #[test]
+    fn from_hex_rejects_odd_len_and_bad_chars() {
+        assert!(from_hex("abc").is_err(), "奇数长度必须报错");
+        assert!(from_hex("zz").is_err(), "非法 hex 字符必须报错");
+        assert_eq!(from_hex("0fa9").unwrap(), vec![0x0f, 0xa9]);
+        assert_eq!(from_hex("").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn unseal_rejects_too_short_blob_fail_closed() {
+        let kek = [2u8; 32];
+        // 远小于 nonce(12)+tag(16) 的密文，必须 fail-closed 不 panic
+        assert!(unseal("00", &kek).is_err());
+        assert!(unseal("", &kek).is_err());
+    }
+
+    #[test]
+    fn private_key_header_recognized_only_when_both_markers_present() {
+        assert!(looks_like_private_key(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nxxx\n-----END OPENSSH PRIVATE KEY-----"
+        ));
+        // 普通文本 / 只有 BEGIN / 只有 PRIVATE KEY 片段都不算私钥
+        assert!(!looks_like_private_key("hello world"));
+        assert!(!looks_like_private_key("-----BEGIN CERTIFICATE-----"));
+        assert!(!looks_like_private_key("PRIVATE KEY----- tail"));
     }
 }
