@@ -28,7 +28,7 @@ for p in sorted(root.rglob("*")):
 # vault_export / vault_import 为档案换机迁移命令。
 # 注：generate_handler![] 注册数与前端基线条数口径不同，部分命令前端不直接调用。
 base = set("""gateway_request gateway_status gateway_token host_key_forget host_key_list
-open_local_pty open_pty pty_resize pty_write remote_stat sftp_download sftp_list
+open_local_pty open_pty pty_resize pty_write close_pty remote_stat sftp_download sftp_list
 sync_folders tq_cancel tq_clear tq_enqueue tq_list tq_pause tq_resume
 vault_add_target vault_export vault_get_key vault_import vault_init
 vault_list_targets vault_lock vault_remove_target vault_status vault_unlock""".split())
