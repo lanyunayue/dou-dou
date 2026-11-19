@@ -7,7 +7,7 @@
     <div v-else-if="orphanCount" class="orphan-banner">
       ⚠️ 有 {{ orphanCount }} 个任务在客户端断开期间保持挂起（置顶显示），可人工终止。
     </div>
-    <div v-if="!pendingTasksView.length" class="empty">没有待审任务</div>
+    <div v-if="!pendingTasksView.length" class="empty">暂无待审任务 —— 高危操作需要放行时会出现在这里</div>
     <div v-for="t in pendingTasksView" :key="t.id" class="approve-card" :class="{ orphan: t.orphaned }">
       <div v-if="t.orphaned" class="orphan-badge">客户端已断开期间挂起</div>
       <div class="mono cmd">{{ t.command }}</div>
@@ -18,11 +18,11 @@
         <span v-if="t.history_count > 0">历史同类 {{ t.history_count }} 次</span>
       </div>
       <div class="approve-actions">
-        <button class="btn ok" @click="decideTask(t.id, true, false)">一次允许</button>
-        <button class="btn ok" :disabled="t.policy==='change'" :title="t.policy==='change' ? '变更档不可关闭审批' : ''" @click="decideTask(t.id, true, true)">本次任务内允许</button>
-        <input v-model="rejectNotes[t.id]" class="filter" placeholder="拒绝理由（必填，将留痕）" />
-        <button class="btn bad" @click="decideTask(t.id, false, false)">拒绝</button>
-        <button class="btn" title="终止网关侧任务（仅对执行中/挂起任务生效）" @click="cancelTask(t.id)">终止任务</button>
+        <button class="btn ok" :disabled="busyTask === t.id" @click="decideTask(t.id, true, false)">{{ busyTask === t.id ? '提交中…' : '一次允许' }}</button>
+        <button class="btn ok" :disabled="t.policy==='change' || busyTask === t.id" :title="t.policy==='change' ? '变更档不可关闭审批' : ''" @click="decideTask(t.id, true, true)">{{ busyTask === t.id ? '提交中…' : '本次任务内允许' }}</button>
+        <input v-model="rejectNotes[t.id]" class="filter" placeholder="拒绝理由（必填，将留痕）" :disabled="busyTask === t.id" />
+        <button class="btn bad" :disabled="busyTask === t.id" @click="decideTask(t.id, false, false)">{{ busyTask === t.id ? '提交中…' : '拒绝' }}</button>
+        <button class="btn" :disabled="busyTask === t.id" title="终止网关侧任务（仅对执行中/挂起任务生效）" @click="cancelTask(t.id)">{{ busyTask === t.id ? '终止中…' : '终止任务' }}</button>
       </div>
     </div>
   </div>
@@ -30,7 +30,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { pendingTasksView, rejectNotes, pendingCount, gwDisconnected, decideTask, cancelTask } from '../core/useApproval'
+import { pendingTasksView, rejectNotes, pendingCount, gwDisconnected, busyTask, decideTask, cancelTask } from '../core/useApproval'
 
 const orphanCount = computed(() => pendingTasksView.value.filter(t => t.orphaned).length)
 </script>

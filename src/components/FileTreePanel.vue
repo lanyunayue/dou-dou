@@ -1,9 +1,12 @@
 <template>
   <div class="panel panel-files" :class="{ 'drag-over': dragActive }" @dragover.prevent @drop.prevent>
     <div class="panelhead">
-      📁 {{cwd}}
-      <button class="mini-btn" @click="goUp">↑ 上级</button>
-      <button class="mini-btn" @click="downloadCwd">下载</button>
+      <span class="tree-path" :title="cwd">📁 {{cwd}}</span>
+      <input v-model="pathInput" class="filter path-jump" placeholder="路径跳转，回车前往"
+        aria-label="远端路径跳转" @keyup.enter="gotoPath" />
+      <button class="mini-btn" @click="goUp" title="返回上级目录">↑ 上级</button>
+      <button class="mini-btn" @click="refreshFiles" title="刷新当前目录">↻ 刷新</button>
+      <button class="mini-btn" @click="downloadSelected" title="下载选中的文件">下载</button>
     </div>
     <div class="fileopts">
       <label><input type="checkbox" v-model="showHidden" /> 隐藏文件</label>
@@ -12,7 +15,7 @@
     <div class="filelist">
       <OfflineState v-if="filesError" variant="files" />
       <template v-else>
-        <div v-for="f in visibleFiles" :key="f.name" class="fileitem" @click="onFile(f)">
+        <div v-for="f in visibleFiles" :key="f.name" class="fileitem" :class="{ selected: selectedFile?.name === f.name }" @click="onFile(f)">
           <span class="icon">{{f.is_dir?'📂':'📄'}}</span><span>{{f.name}}</span>
         </div>
         <div v-if="!visibleFiles.length" class="file-empty">目录为空或过滤条件无匹配</div>
@@ -26,18 +29,28 @@
 import { onMounted, onUnmounted } from 'vue'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import OfflineState from './OfflineState.vue'
-import { cwd, showHidden, fileFilter, visibleFiles, filesError, dragActive, loadFiles, goUp, downloadCwd, onFile, registerDropListener } from '../core/useFileTree'
+import { cwd, showHidden, fileFilter, visibleFiles, filesError, dragActive, selectedFile, pathInput, loadFiles, goUp, refreshFiles, gotoPath, downloadSelected, onFile, registerDropListener } from '../core/useFileTree'
 import { activeTarget } from '../core/useSsh'
+import { on, off } from '../events/useEventBus'
 
 let dropUnlisten: UnlistenFn | null = null
 
+// 文件保存后刷新当前目录列表（文件树与编辑器状态同步）；路径落在当前目录才重载。
+function onFileSaved(path: string) {
+  if (path && (path === cwd.value || path.startsWith(cwd.value + '/'))) refreshFiles()
+}
+
 // R1：启动不再自动连内测目标——已连接时进入文件视图按需加载当前目录
 onMounted(async () => {
+  on('file:saved', onFileSaved)
   if (activeTarget.value) loadFiles(cwd.value)
   dropUnlisten = await registerDropListener()
 })
 
-onUnmounted(() => { dropUnlisten?.(); dropUnlisten = null })
+onUnmounted(() => {
+  off('file:saved', onFileSaved)
+  dropUnlisten?.(); dropUnlisten = null
+})
 </script>
 
 <style scoped>
@@ -56,4 +69,7 @@ onUnmounted(() => { dropUnlisten?.(); dropUnlisten = null })
   font-size: 13px;
   pointer-events: none;
 }
+.tree-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-jump { width: 150px; }
+.fileitem.selected { background: var(--dou-panel-alt); outline: 1px solid var(--dou-accent); }
 </style>

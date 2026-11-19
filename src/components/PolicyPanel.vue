@@ -47,7 +47,7 @@ onMounted(load)
 </script>
 
 <template>
-  <StateShell :state="shell" :error-text="errorText" empty-text="网关未返回任何策略规则" @retry="load">
+  <StateShell :state="shell" :error-text="errorText" empty-text="暂无策略规则 —— 内置规则由网关下发，连接网关后在此查看" @retry="load">
     <div class="wizard" v-for="tier in ['observe', 'execute', 'change']" :key="tier">
       <h3 class="tier-title" :data-tier="tier">{{ tierLabel[tier] }}档 · {{ byTier(tier).length }} 条</h3>
       <table class="scope-table" v-if="byTier(tier).length">

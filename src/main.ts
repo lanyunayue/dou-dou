@@ -3,5 +3,11 @@ import { createApp } from "vue";
 import "./monaco-setup";
 import App from "./views/App.vue";
 import "./styles/app.css";
+import { installAppErrorHandler, installGlobalErrorHandlers } from "./core/useGlobalError";
 
-createApp(App).mount("#app");
+const app = createApp(App);
+// 全局兜底：未被 ErrorBoundary 捕获的组件错误、window 错误与未处理 Promise 拒绝
+// 统一进错误条并提示，避免静默白屏。
+installAppErrorHandler(app);
+installGlobalErrorHandlers();
+app.mount("#app");

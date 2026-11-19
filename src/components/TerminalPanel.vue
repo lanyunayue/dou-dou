@@ -3,14 +3,14 @@
     <!-- R6 工具条降噪：+ 主按钮 / 本地 Shell 次按钮 / 检索 ≥5 会话才出现 / 广播勾选 ≥1 才出现 / 导出进溢出菜单 -->
     <div class="tabbar">
       <div v-for="t in visibleTabs" :key="t.sid" class="tab" :class="{active: t.sid===activeSid}" @click="switchTab(t.sid)">
-        <input type="checkbox" class="tabcheck" v-model="t.selected" @click.stop />
+        <input type="checkbox" class="tabcheck" v-model="t.selected" title="加入广播：勾选后命令只发给这些会话" @click.stop />
         {{t.title}}<span v-if="t.badge" class="badge">{{t.badge}}</span>
         <span class="close" @click.stop="closeTab(t.sid)">×</span>
       </div>
       <button class="tabadd primary" @click="toggleConnectForm" title="新建连接：主机 + 认证方式一气呵成">＋</button>
       <button class="mini-btn" @click="openLocalTab" title="本地 PowerShell，无需远程主机">本地 Shell</button>
       <input v-if="showSessionFilter" v-model="sessionFilter" class="filter tabfilter" placeholder="检索会话" />
-      <input v-if="selectedCount" v-model="broadcast" class="broadcast" placeholder="同时输入到所选会话（回车发送）" @keyup.enter="doBroadcast" />
+      <input v-if="selectedCount" v-model="broadcast" class="broadcast" placeholder="发送到所选会话（未勾选则全部），回车发送" @keyup.enter="doBroadcast" />
       <div v-if="tabs.length" class="overflow">
         <button class="mini-btn" title="更多操作" :aria-expanded="menuOpen" @click.stop="menuOpen=!menuOpen">⋯</button>
         <div v-if="menuOpen" class="overflow-menu">
@@ -26,7 +26,7 @@
         <span class="hb-meter"><span class="hb-fill" :class="meterClass(hostStats.cpu_pct)" :style="{ width: hostStats.cpu_pct + '%' }"></span></span>
       </span>
       <span class="hb-item">
-        内存 {{ hostStats.mem_used_mb }}/{{ hostStats.mem_total_mb }} MB
+        内存 {{ hostStats.mem_used_mb }}/{{ hostStats.mem_total_mb }} MB（{{ memPct }}%）
         <span class="hb-meter"><span class="hb-fill" :class="meterClass(memPct)" :style="{ width: memPct + '%' }"></span></span>
       </span>
       <span class="hb-item">↓ {{ fmtKbps(hostStats.rx_kbps) }} · ↑ {{ fmtKbps(hostStats.tx_kbps) }}</span>

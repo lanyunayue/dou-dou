@@ -2,9 +2,9 @@ import type { Terminal } from 'xterm'
 import type { FitAddon } from 'xterm-addon-fit'
 import type { SearchAddon } from 'xterm-addon-search'
 
-/** 统一可见错误态载荷（fail-closed / 401 / 429 / 网关离线） */
+/** 统一可见错误态载荷（fail-closed / 401 / 429 / 网关离线 / 未捕获异常） */
 export interface GwErrorInfo {
-  code: 'TOKEN_UNAVAILABLE' | 'AUTH_FAILED' | 'THROTTLED' | 'GATEWAY_OFFLINE'
+  code: 'TOKEN_UNAVAILABLE' | 'AUTH_FAILED' | 'THROTTLED' | 'GATEWAY_OFFLINE' | 'UNCAUGHT'
   message: string
   retryable: boolean
 }

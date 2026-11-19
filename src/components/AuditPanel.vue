@@ -137,7 +137,10 @@ onMounted(() => { load(); loadChain() })
       审计链：{{ chainOk === null ? '未知' : chainOk ? `完整（${entries} 条）` : '已断裂！存在被篡改风险' }}
     </div>
 
-    <StateShell :state="shell" :error-text="errorText" empty-text="当前过滤条件下无审计记录" @retry="load">
+    <StateShell :state="shell" :error-text="errorText" empty-text="当前过滤条件下暂无审计记录 —— 连接主机执行操作后会在此留痕" @retry="load">
+      <template #empty-actions>
+        <button v-if="since !== 'all'" type="button" class="mini-btn" @click="since = 'all'; load()">查看全部时间</button>
+      </template>
       <div class="auditlist" role="table" aria-label="审计记录">
         <div v-for="(it, i) in items" :key="it.trace_id ?? i" class="audititem" role="row">
           <span class="a-time">{{ fmtTime(it) }}</span>

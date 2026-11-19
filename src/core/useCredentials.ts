@@ -8,6 +8,8 @@ export const tokens = ref<any[]>([])
 export const issueTier = ref('observe')
 export const issueClient = ref('web')
 export const issuedToken = ref('')
+// 签发提交中防重：避免连点重复签发令牌。
+export const issuing = ref(false)
 
 export async function loadTokens() {
   try {
@@ -21,6 +23,8 @@ export async function loadTokens() {
 }
 
 export async function issueToken() {
+  if (issuing.value) return
+  issuing.value = true
   issuedToken.value = ''
   try {
     const r = await gwFetch('/scope/tokens', {
@@ -32,6 +36,8 @@ export async function issueToken() {
     else notify('签发失败: ' + (j.error || ''))
   } catch {
     notify('签发失败：' + (gwError.value?.message || '请求未完成'))
+  } finally {
+    issuing.value = false
   }
 }
 
@@ -54,5 +60,5 @@ export async function copyIssued() { await navigator.clipboard.writeText(issuedT
 export function fmtTime(ms: number) { return fmtMs(ms) }
 
 export function useCredentials() {
-  return { tokens, issueTier, issueClient, issuedToken, loadTokens, issueToken, revokeToken, copyIssued, fmtTime }
+  return { tokens, issueTier, issueClient, issuedToken, issuing, loadTokens, issueToken, revokeToken, copyIssued, fmtTime }
 }

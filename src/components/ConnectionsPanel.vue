@@ -188,63 +188,64 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
 </script>
 
 <template>
-  <StateShell :state="shell" :error-text="errorText" empty-text="暂无连接档案 —— 填写主机信息即可 3 步入库" @retry="load">
-    <div class="wizard">
-      <div class="row vault-state">
-        <span class="hint" :class="unlocked ? 'ok-text' : 'warn-text'">
-          {{ unlocked ? '保险库已解锁' : '保险库锁定中（新增主机需先解锁）' }}
-        </span>
-      </div>
+  <div class="wizard conn-page">
+    <div class="row vault-state">
+      <span class="hint" :class="unlocked ? 'ok-text' : 'warn-text'">
+        {{ unlocked ? '保险库已解锁' : '保险库锁定中（新增主机需先解锁）' }}
+      </span>
+    </div>
 
-      <!-- 保险库状态与解锁（私钥明文不落盘，锁定即清内存密钥） -->
-      <div class="row vault-state">
-        <template v-if="!unlocked">
-          <input v-model="masterPw" type="password" class="filter" placeholder="主密码" aria-label="保险库主密码" @keyup.enter="vaultUnlock" />
-          <button type="button" class="btn" :disabled="!initAgreed" title="需先勾选下方不可恢复告知" @click="vaultInit">初始化</button>
-          <button type="button" class="btn ok" @click="vaultUnlock">解锁</button>
-          <span class="hint">首次使用先「初始化」；解锁后可新增主机。锁定时清除内存密钥。</span>
-          <!-- R10：主密码不可恢复告知（仅初始化需勾选；解锁已有保险库无需勾选） -->
-          <label class="hint agree-row agree-full">
-            <input v-model="initAgreed" type="checkbox" aria-label="确认忘记主密码不可恢复" />
-            我已知晓：忘记主密码 = 档案不可恢复（应用无后门、无找回渠道），请务必牢记主密码（仅初始化需勾选）
-          </label>
-        </template>
-        <template v-else>
-          <span class="hint ok-text">保险库已解锁</span>
-          <button type="button" class="btn bad" @click="vaultLock">锁定</button>
-        </template>
-      </div>
+    <!-- 保险库状态与解锁（私钥明文不落盘，锁定即清内存密钥） -->
+    <div class="row vault-state">
+      <template v-if="!unlocked">
+        <input v-model="masterPw" type="password" class="filter" placeholder="主密码" aria-label="保险库主密码" @keyup.enter="vaultUnlock" />
+        <button type="button" class="btn" :disabled="!initAgreed" title="需先勾选下方不可恢复告知" @click="vaultInit">初始化</button>
+        <button type="button" class="btn ok" @click="vaultUnlock">解锁</button>
+        <span class="hint">首次使用先「初始化」；解锁后可新增主机。锁定时清除内存密钥。</span>
+        <!-- R10：主密码不可恢复告知（仅初始化需勾选；解锁已有保险库无需勾选） -->
+        <label class="hint agree-row agree-full">
+          <input v-model="initAgreed" type="checkbox" aria-label="确认忘记主密码不可恢复" />
+          我已知晓：忘记主密码 = 档案不可恢复（应用无后门、无找回渠道），请务必牢记主密码（仅初始化需勾选）
+        </label>
+      </template>
+      <template v-else>
+        <span class="hint ok-text">保险库已解锁</span>
+        <button type="button" class="btn bad" @click="vaultLock">锁定</button>
+      </template>
+    </div>
 
-      <!-- 换机迁移：导出加密备份 / 从备份导入 -->
-      <div class="row vault-migrate">
-        <button type="button" class="btn" @click="exportVault">📤 导出档案（换机备份）</button>
-        <button type="button" class="btn" @click="importVault">📥 导入档案</button>
-        <span class="hint">导出的是加密文件；换机用原主密码解锁。导入需先把备份放到应用数据目录的 vault.import.json。</span>
-      </div>
+    <!-- 换机迁移：导出加密备份 / 从备份导入 -->
+    <div class="row vault-migrate">
+      <button type="button" class="btn" @click="exportVault">📤 导出档案（换机备份）</button>
+      <button type="button" class="btn" @click="importVault">📥 导入档案</button>
+      <span class="hint">导出的是加密文件；换机用原主密码解锁。导入需先把备份放到应用数据目录的 vault.import.json。</span>
+    </div>
 
-      <!-- 3 步快速添加 -->
-      <div class="row" role="group" aria-label="快速添加主机">
-        <input v-model="quickName" class="filter" placeholder="名称（可留空）" aria-label="连接名称" />
-        <input v-model="quickHost" class="filter" placeholder="host，如 10.0.0.224" aria-label="主机地址" />
-        <input v-model="quickPort" class="filter quick-port" placeholder="22" aria-label="端口" />
-        <input v-model="quickUser" class="filter" placeholder="user" aria-label="用户名" />
-        <select v-model="quickAuth" class="quick-auth" aria-label="认证方式">
-          <option value="key">密钥认证</option>
-          <option value="password">密码认证</option>
-        </select>
-        <button type="button" class="btn ok" @click="quickAdd">加密入库</button>
-      </div>
-      <div class="row hint-row">
-        <span class="hint">{{ quickAuth === 'password' ? '密码模式：目标只存地址，密码不入库，连接时输入（仅驻留内存）' : '密钥模式：私钥加密入库，明文只在内存解密' }}</span>
-      </div>
+    <!-- 3 步快速添加（常驻：空档案时也可直接填写入库） -->
+    <div class="row" role="group" aria-label="快速添加主机">
+      <input v-model="quickName" class="filter" placeholder="名称（可留空）" aria-label="连接名称" />
+      <input v-model="quickHost" class="filter" placeholder="host，如 10.0.0.224" aria-label="主机地址" />
+      <input v-model="quickPort" class="filter quick-port" placeholder="22" aria-label="端口" />
+      <input v-model="quickUser" class="filter" placeholder="user" aria-label="用户名" />
+      <select v-model="quickAuth" class="quick-auth" aria-label="认证方式">
+        <option value="key">密钥认证</option>
+        <option value="password">密码认证</option>
+      </select>
+      <button type="button" class="btn ok" @click="quickAdd">加密入库</button>
+    </div>
+    <div class="row hint-row">
+      <span class="hint">{{ quickAuth === 'password' ? '密码模式：目标只存地址，密码不入库，连接时输入（仅驻留内存）' : '密钥模式：私钥加密入库，明文只在内存解密' }}</span>
+    </div>
 
-      <!-- R16：档案过滤（名称 / 主机 / 用户，不区分大小写） -->
-      <div class="row" role="search">
-        <input v-model="query" class="filter" placeholder="过滤档案：名称 / 主机 / 用户"
-               aria-label="过滤连接档案" />
-        <span v-if="query && visibleTargets.length === 0" class="hint warn-text">无匹配「{{ query }}」的档案</span>
-      </div>
+    <!-- R16：档案过滤（名称 / 主机 / 用户，不区分大小写） -->
+    <div class="row" role="search">
+      <input v-model="query" class="filter" placeholder="过滤档案：名称 / 主机 / 用户"
+             aria-label="过滤连接档案" />
+    </div>
 
+    <!-- 档案列表单独走四态：空 / 错 / 加载不遮挡上方常驻表单 -->
+    <StateShell :state="shell" :error-text="errorText" empty-text="暂无连接档案 —— 填写上方主机信息即可 3 步入库" @retry="load">
+      <div v-if="query && visibleTargets.length === 0" class="hint warn-text filter-empty">无匹配「{{ query }}」的档案</div>
       <!-- R8：双击卡片 = 一键连接主路径；主操作按钮与双击等价 -->
       <div v-for="t in visibleTargets" :key="t.name" class="approve-card clickable"
            :title="`双击卡片一键连接 ${t.name}`"
@@ -273,8 +274,8 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
           <button type="button" class="btn ok" :disabled="!pwInput || connecting === t.name" @click="connectArchive(t, pwInput)">连接</button>
         </div>
       </div>
-    </div>
-  </StateShell>
+    </StateShell>
+  </div>
 </template>
 
 <style scoped>
@@ -301,6 +302,8 @@ onUnmounted(() => { unlisteners.forEach(u => u()); unlisteners.length = 0 })
 .agree-row input[type='checkbox'] { margin-top: 3px; }
 .pw-row { margin-top: 8px; }
 .pw-row .filter { max-width: 260px; }
+.conn-page { height: 100%; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+.filter-empty { padding: 8px 0; }
 .conn-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .vault-state { margin-top: 4px; }
 .vault-migrate { flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -8,6 +8,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [vue()],
 
+  // 与 tsconfig target=ES2020 对齐：锁定产物语法基线，避免默认 modules
+  // 产出 WebView2 旧内核不认识的新语法（Tauri2 Windows 走 Chromium WebView2）。
+  build: {
+    target: 'es2020',
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

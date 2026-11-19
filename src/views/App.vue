@@ -33,6 +33,9 @@
       </nav>
     </aside>
     <div class="workspace">
+      <!-- 非阻塞反馈 toast（信息/成功/警告/错误），危险确认仍走 confirm -->
+      <ToastHost />
+
       <!-- 统一可见错误态：fail-closed / 401 / 429 / 网关离线，含一键重试 -->
       <ErrorBanner />
 
@@ -81,6 +84,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event'
 
 import ErrorBanner from '../components/ErrorBanner.vue'
 import ErrorBoundary from '../components/ErrorBoundary.vue'
+import ToastHost from '../components/ToastHost.vue'
 import FileTreePanel from '../components/FileTreePanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import EditorPanel from '../components/EditorPanel.vue'
