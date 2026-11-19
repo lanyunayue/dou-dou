@@ -20,6 +20,10 @@ pub struct PtySession {
     pub tx: mpsc::UnboundedSender<String>,
     /// R4：ConPTY 会话的 resize 通道（cols, rows）；SSH 会话与管道回退模式为 None。
     pub resize: Option<mpsc::UnboundedSender<(u16, u16)>>,
+    /// 关闭信号通道：收到信号后后台读/写循环退出，channel / 会话句柄随之释放。
+    pub close: Option<mpsc::UnboundedSender<()>>,
+    /// 管道模式本地子进程句柄；关闭会话时主动 kill。ConPTY / SSH 会话为 None。
+    pub child: Option<tokio::process::Child>,
 }
 
 #[derive(Default)]
@@ -85,6 +89,7 @@ pub async fn open_pty(
 
     let sid = uuid::Uuid::new_v4().to_string();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (close_tx, mut close_rx) = mpsc::unbounded_channel::<()>();
 
     // 后台：读 channel stdout，推事件
     let sid_e = sid.clone();
@@ -112,6 +117,7 @@ pub async fn open_pty(
                 Some(input) = rx.recv() => {
                     let _ = channel.data(std::io::Cursor::new(input.into_bytes())).await;
                 }
+                Some(_) = close_rx.recv() => break,
                 else => break,
             }
         }
@@ -120,7 +126,15 @@ pub async fn open_pty(
     // 存到 state
     {
         let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.insert(sid.clone(), PtySession { tx, resize: None });
+        sessions.insert(
+            sid.clone(),
+            PtySession {
+                tx,
+                resize: None,
+                close: Some(close_tx),
+                child: None,
+            },
+        );
     }
 
     Ok(sid)
@@ -307,11 +321,15 @@ fn open_local_conpty(app: AppHandle, state: &PtyState) -> Result<String, String>
 
         {
             let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+            // ConPTY 进程/伪终端句柄封闭在 OS 线程闭包内，本轮 close_pty 先释放注册与
+            // 输入通道；本地 ConPTY 进程的句柄级收口留 B2 会话互通阶段处理。
             sessions.insert(
                 sid.clone(),
                 PtySession {
                     tx,
                     resize: Some(resize_tx),
+                    close: None,
+                    child: None,
                 },
             );
         }
@@ -345,6 +363,7 @@ async fn open_local_pipe(app: AppHandle, state: &PtyState) -> Result<String, Str
 
     let sid = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel::<String>();
+    let (close_tx, mut close_rx) = mpsc::unbounded_channel::<()>();
 
     // stdout / stderr → pty_data（两个独立 task，避免单 task select 在一方 EOF 后饿死另一方）
     let app_o = app.clone();
@@ -376,28 +395,33 @@ async fn open_local_pipe(app: AppHandle, state: &PtyState) -> Result<String, Str
         }
     });
 
-    // 前端输入 → stdin
+    // 前端输入 → stdin；收到关闭信号或通道结束即退出写线程。
     tokio::spawn(async move {
         let mut rx = rx;
-        while let Some(input) = rx.recv().await {
-            if stdin.write_all(input.as_bytes()).await.is_err() {
-                break;
+        loop {
+            tokio::select! {
+                Some(input) = rx.recv() => {
+                    if stdin.write_all(input.as_bytes()).await.is_err() { break; }
+                    let _ = stdin.flush().await;
+                }
+                Some(_) = close_rx.recv() => break,
+                else => break,
             }
-            let _ = stdin.flush().await;
         }
-    });
-
-    // 退出 → pty_exit
-    let sid_w = sid.clone();
-    let app_w = app.clone();
-    tokio::spawn(async move {
-        let _ = child.wait().await;
-        let _ = app_w.emit("pty_exit", serde_json::json!({"sid": sid_w}));
     });
 
     {
         let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.insert(sid.clone(), PtySession { tx, resize: None });
+        // child 句柄存入会话：close_pty 时主动 kill；自然退出的 pty_exit 探测留 B2 收口。
+        sessions.insert(
+            sid.clone(),
+            PtySession {
+                tx,
+                resize: None,
+                close: Some(close_tx),
+                child: Some(child),
+            },
+        );
     }
 
     Ok(sid)
@@ -422,4 +446,28 @@ pub async fn pty_write(state: &PtyState, sid: &str, data: &str) -> Result<(), St
         .get(sid)
         .ok_or_else(|| format!("session {sid} 不存在"))?;
     s.tx.send(data.to_string()).map_err(|e| e.to_string())
+}
+
+/// 关闭并释放一个 PTY 会话：移出注册表、发关闭信号退出后台循环、kill 管道模式子进程。
+///
+/// - SSH 会话：close 信号让读循环退出，channel 与 Arc 会话句柄随之 drop；
+/// - 管道模式本地 Shell：主动 kill 子进程；
+/// - ConPTY 会话：句柄封闭在 OS 线程闭包内，本轮先释放注册与输入通道，
+///   伪终端/进程句柄级收口留 B2 会话互通阶段。
+///
+/// 重复关闭（sid 已不存在）视为成功，前端关闭标签不因此报错。
+pub fn close_pty(state: &PtyState, sid: &str) {
+    let mut sessions = match state.sessions.lock() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    if let Some(s) = sessions.remove(sid) {
+        if let Some(close) = s.close {
+            let _ = close.send(());
+        }
+        if let Some(mut child) = s.child {
+            // start_kill 同步发终止信号；句柄随后 drop，kill_on_drop 兜底回收。
+            let _ = child.start_kill();
+        }
+    }
 }

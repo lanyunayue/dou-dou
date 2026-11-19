@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { status, connSummary, refresh, gwFetch } from '../adapters/useGateway'
-import { snapshot, importMoba } from '../commands/useShell'
+import { snapshot, importMoba, localSnapshotCount, localImportedCount } from '../commands/useShell'
+import { termFontSize, setTermFontSize, FONT_SIZE_OPTIONS_EXPORT as FONT_SIZE_OPTIONS } from '../core/useTerminal'
 import { notify } from '../shared/feedback'
 import StateShell from './StateShell.vue'
 
@@ -12,7 +13,14 @@ import StateShell from './StateShell.vue'
 const shell = ref<'loading' | 'empty' | 'error' | 'ready'>('loading')
 const errorText = ref('')
 const health = ref('')
+const snapCount = ref(0)
+const importedCount = ref(0)
 let alive = true
+
+function refreshLocalCounts() {
+  snapCount.value = localSnapshotCount()
+  importedCount.value = localImportedCount()
+}
 
 async function load() {
   shell.value = 'loading'
@@ -29,10 +37,10 @@ async function load() {
   }
 }
 
-async function runSnapshot() { try { await snapshot() } catch (e: any) { notify('快照失败：' + (e?.message ?? String(e))) } }
-async function runImport() { try { await importMoba() } catch (e: any) { notify('导入失败：' + (e?.message ?? String(e))) } }
+async function runSnapshot() { try { await snapshot(); refreshLocalCounts() } catch (e: any) { notify('快照失败：' + (e?.message ?? String(e))) } }
+async function runImport() { try { await importMoba(); refreshLocalCounts() } catch (e: any) { notify('导入失败：' + (e?.message ?? String(e))) } }
 
-onMounted(async () => { await load() })
+onMounted(async () => { refreshLocalCounts(); await load() })
 </script>
 
 <template>
@@ -46,12 +54,25 @@ onMounted(async () => { await load() })
     </div>
 
     <div class="wizard">
+      <h3 class="sec-title">外观</h3>
+      <div class="set-row">
+        <span class="set-k">终端字号</span>
+        <select :value="termFontSize" aria-label="终端字号" @change="setTermFontSize(Number(($event.target as HTMLSelectElement).value))">
+          <option v-for="opt in FONT_SIZE_OPTIONS" :key="opt" :value="opt">{{ opt }} px</option>
+        </select>
+        <span class="hint">对新建与已有会话即时生效，本机保存。</span>
+      </div>
+    </div>
+
+    <div class="wizard">
       <h3 class="sec-title">工具动作</h3>
       <div class="row">
         <button type="button" class="btn ok" @click="runSnapshot">📸 采集实验快照</button>
         <button type="button" class="btn" @click="runImport">📥 导入 MobaXterm 会话</button>
       </div>
+      <div class="hint">本机本地存储：快照 {{ snapCount }} 个 · 已导入会话 {{ importedCount }} 条。</div>
       <div class="hint">快照按「命令哈希 + 参数规范化 + 数据集路径」生成三段指纹，重复执行会在「实验详情」聚合提示。</div>
+      <div class="hint">说明：本地快照与 MobaXterm 导入会话暂存于本机浏览器本地存储，尚未上传网关、也未进入保险库档案；后续档案统一（B1）后再入库。</div>
     </div>
 
     <div class="wizard">

@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { gwFetch } from '../adapters/useGateway'
 import { notify } from '../shared/feedback'
+import { verdictClass } from '../shared/verdict'
+import { fmtAuditTime } from '../shared/timeFmt'
 import { useRequestGuard } from '../core/useRequestGuard'
 import StateShell from './StateShell.vue'
 
@@ -98,16 +100,7 @@ async function exportCsv() {
 }
 
 function fmtTime(item: AuditItem): string {
-  const raw = item.ts_ms ?? item.ts ?? ''
-  const n = Number(raw)
-  if (!raw || !Number.isFinite(n) || n <= 0) return String(raw || '-')
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
-
-function verdictClass(v?: string): string {
-  if (v === 'allow' || v === 'granted' || v === 'ok') return 'v-allow'
-  if (v === 'deny' || v === 'denied' || v === 'blocked') return 'v-deny'
-  return 'v-ask'
+  return fmtAuditTime(item.ts_ms, item.ts)
 }
 
 const countText = computed(() => `共 ${items.value.length} 条（最多显示 300 条）`)
@@ -144,7 +137,10 @@ onMounted(() => { load(); loadChain() })
       审计链：{{ chainOk === null ? '未知' : chainOk ? `完整（${entries} 条）` : '已断裂！存在被篡改风险' }}
     </div>
 
-    <StateShell :state="shell" :error-text="errorText" empty-text="当前过滤条件下无审计记录" @retry="load">
+    <StateShell :state="shell" :error-text="errorText" empty-text="当前过滤条件下暂无审计记录 —— 连接主机执行操作后会在此留痕" @retry="load">
+      <template #empty-actions>
+        <button v-if="since !== 'all'" type="button" class="mini-btn" @click="since = 'all'; load()">查看全部时间</button>
+      </template>
       <div class="auditlist" role="table" aria-label="审计记录">
         <div v-for="(it, i) in items" :key="it.trace_id ?? i" class="audititem" role="row">
           <span class="a-time">{{ fmtTime(it) }}</span>

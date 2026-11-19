@@ -41,7 +41,7 @@ export async function registerHostKeyListener(): Promise<UnlistenFn> {
   return await listen('host_key_event', (e: any) => {
     const p = e.payload
     if (p.kind === 'first_seen') {
-      notify(`新主机密钥（首次连接，请肉眼确认指纹）\n${p.host}:${p.port}\nSHA256: ${p.fingerprint}`)
+      notify(`新主机密钥（首次连接）\n${p.host}:${p.port}\nSHA256: ${p.fingerprint}\n\n本次已先记录。请通过其他渠道核对指纹；若不一致，到「主机密钥」页遗忘该记录后重连重新确认。`)
     } else if (p.kind === 'mismatch') {
       notify(`⚠ 主机密钥变更 / 疑似中间人！已拒绝连接\n${p.host}:${p.port}\n记录: ${p.expected}\n收到: ${p.got}\n\n请先通过其他渠道人工核实对方身份；确认合法换钥后，到「主机密钥」页遗忘旧记录再重连重新确认指纹。无法核实则保持拒绝。`)
     }

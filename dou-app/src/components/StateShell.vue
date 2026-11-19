@@ -32,7 +32,10 @@ defineEmits<{ retry: [] }>()
       <span>{{ loadingText }}</span>
     </div>
 
-    <div v-else-if="state === 'empty'" class="shell-empty">{{ emptyText }}</div>
+    <div v-else-if="state === 'empty'" class="shell-empty">
+      <div>{{ emptyText }}</div>
+      <slot name="empty-actions" />
+    </div>
 
     <div v-else-if="state === 'error'" class="shell-error" role="alert">
       <div class="shell-error-text">{{ errorText }}</div>

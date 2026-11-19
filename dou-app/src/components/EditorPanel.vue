@@ -6,10 +6,14 @@
       <span>⚠ 该实验<template v-if="rerun.runs > 1">已跑过 {{ rerun.runs }} 次</template><template v-else>跑过一次</template>，结果在 <code class="mono">{{ rerun.result_dir }}</code></span>
       <button type="button" class="mini-btn" @click="openResult">查看结果目录</button>
     </div>
+    <!-- 读写通道未接通：明确标注草稿预览态，避免误以为修改已写回远端 -->
+    <div v-if="!editorWritable" class="draft-banner" role="status">
+      ⓘ 文件读写通道暂未开放：当前为草稿预览，编辑内容不会写回远端（文件层接线后可用）
+    </div>
     <VueMonacoEditor class="editorarea" v-model:value="editorText" :language="language" theme="dou-terminal" />
     <div class="editorbar">
-      <button class="btn" :disabled="!editingFile" @click="saveFile">保存</button>
-      <span class="hint">保存前比对远端 mtime；走 dou.put 过隔离区+扫描 · 高亮：{{ language }}</span>
+      <button class="btn" :disabled="!editingFile || saving || !editorWritable" @click="saveFile">{{ saving ? '保存中…' : '保存' }}</button>
+      <span class="hint">{{ editorWritable ? '保存前比对远端 mtime，经 SSH 写回远端（大文件仅预览不可存）' : '保存通道暂未开放 · 高亮：' + language }}</span>
     </div>
   </div>
 </template>
@@ -17,7 +21,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
-import { editingFile, editorText, saveFile } from '../core/useEditor'
+import { editingFile, editorText, saving, editorWritable, saveFile } from '../core/useEditor'
 import { loadFiles } from '../core/useFileTree'
 import { navigateTo } from '../core/useNav'
 import { languageForFile } from '../core/editorLanguage'
@@ -76,4 +80,14 @@ function openResult() {
 }
 .rerun-banner code { word-break: break-all; }
 .rerun-banner .mini-btn { float: none; }
+.draft-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--dou-warn-bg);
+  border-bottom: 1px solid var(--dou-warn);
+  color: var(--dou-warn-text);
+  font-size: var(--dou-fs-sm);
+}
 </style>

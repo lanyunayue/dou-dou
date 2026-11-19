@@ -1,9 +1,10 @@
 import type { Terminal } from 'xterm'
 import type { FitAddon } from 'xterm-addon-fit'
+import type { SearchAddon } from 'xterm-addon-search'
 
-/** 统一可见错误态载荷（fail-closed / 401 / 429 / 网关离线） */
+/** 统一可见错误态载荷（fail-closed / 401 / 429 / 网关离线 / 未捕获异常） */
 export interface GwErrorInfo {
-  code: 'TOKEN_UNAVAILABLE' | 'AUTH_FAILED' | 'THROTTLED' | 'GATEWAY_OFFLINE'
+  code: 'TOKEN_UNAVAILABLE' | 'AUTH_FAILED' | 'THROTTLED' | 'GATEWAY_OFFLINE' | 'UNCAUGHT'
   message: string
   retryable: boolean
 }
@@ -35,6 +36,8 @@ export interface TerminalTab {
   term: Terminal
   /** 每会话独立的 fit 插件（切换标签显示时按容器重排） */
   fit?: FitAddon
+  /** R14 终端查找插件实例 */
+  search?: SearchAddon
   selected?: boolean
   badge?: number
   /** 本地 Shell 会话（不走 SSH，远程主机不可达时也可用） */

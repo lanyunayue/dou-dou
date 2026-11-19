@@ -1,7 +1,8 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { notify } from '../shared/feedback'
+import { notifyWarn, notifyError, notifySuccess } from '../shared/feedback'
+import { fmtBytes } from '../shared/format'
 
 // ---------- 传输队列 / 同步 ----------
 export const tqTasks = ref<any[]>([])
@@ -12,27 +13,61 @@ export const syncLocal = ref('')
 export const syncRemote = ref('')
 export const syncMode = ref('push')
 
-export function fmtBytes(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB']; let i = 0; let x = n
-  while (x >= 1024 && i < u.length - 1) { x /= 1024; i++ }
-  return (i ? x.toFixed(1) : String(x)) + ' ' + u[i]
-}
+// 提交中防重：入队 / 同步各自一把锁，避免连点重复发任务。
+export const busyEnqueue = ref(false)
+export const busySync = ref(false)
+
+// fmtBytes 纯格式化函数位于 shared/format.ts，此处重新导出供面板解构。
+export { fmtBytes }
 
 export async function loadTq() { try { tqTasks.value = await invoke('tq_list') } catch { tqTasks.value = [] } }
+
 export async function enqueueTq() {
-  if (!tqRemote.value || !tqLocal.value) { notify('请填写远端路径与本地路径'); return }
-  try { await invoke('tq_enqueue', { kind: tqType.value, label: tqRemote.value, remote: tqRemote.value, local: tqLocal.value }); await loadTq() }
-  catch (e: any) { notify('入队失败: ' + e) }
+  if (busyEnqueue.value) return
+  if (!tqRemote.value.trim() || !tqLocal.value.trim()) { notifyWarn('请填写远端路径与本地路径'); return }
+  busyEnqueue.value = true
+  try {
+    await invoke('tq_enqueue', { kind: tqType.value, label: tqRemote.value, remote: tqRemote.value.trim(), local: tqLocal.value.trim() })
+    await loadTq()
+    notifySuccess('任务已加入队列')
+  } catch (e: any) { notifyError('入队失败: ' + (e?.message ?? e)) }
+  finally { busyEnqueue.value = false }
 }
+
 export async function tqCancel(id: string) { await invoke('tq_cancel', { id }); await loadTq() }
 export async function tqPause(id: string) { await invoke('tq_pause', { id }); await loadTq() }
 export async function tqResume(id: string) { await invoke('tq_resume', { id }); await loadTq() }
 export async function tqClear() { await invoke('tq_clear'); await loadTq() }
+
+/** 失败任务重试：文件任务按原远端/本地重新入队；同步任务按原目录与模式重新发起。 */
+export async function retryTask(task: any) {
+  if (!task) return
+  if (String(task.kind).startsWith('sync:')) {
+    const mode = String(task.kind).split(':')[1] || 'push'
+    await doSyncWith(task.local, task.remote, mode)
+    return
+  }
+  try {
+    await invoke('tq_enqueue', { kind: task.kind, label: task.label, remote: task.remote, local: task.local })
+    await loadTq()
+    notifySuccess('已重新加入队列')
+  } catch (e: any) { notifyError('重试失败: ' + (e?.message ?? e)) }
+}
+
+async function doSyncWith(localDir: string, remoteDir: string, mode: string) {
+  if (busySync.value) return
+  busySync.value = true
+  try {
+    await invoke('sync_folders', { localDir, remoteDir, mode })
+    await loadTq()
+    notifySuccess('同步任务已重新发起')
+  } catch (e: any) { notifyError('同步失败: ' + (e?.message ?? e)) }
+  finally { busySync.value = false }
+}
+
 export async function doSync() {
-  if (!syncLocal.value || !syncRemote.value) { notify('请填写本地与远端目录'); return }
-  try { await invoke('sync_folders', { localDir: syncLocal.value, remoteDir: syncRemote.value, mode: syncMode.value }); await loadTq() }
-  catch (e: any) { notify('同步失败: ' + e) }
+  if (!syncLocal.value.trim() || !syncRemote.value.trim()) { notifyWarn('请填写本地与远端目录'); return }
+  await doSyncWith(syncLocal.value.trim(), syncRemote.value.trim(), syncMode.value)
 }
 
 // tq_progress 订阅：队列进度实时刷新
@@ -43,6 +78,7 @@ export async function registerTqListener(): Promise<UnlistenFn> {
 export function useTransferQueue() {
   return {
     tqTasks, tqRemote, tqLocal, tqType, syncLocal, syncRemote, syncMode,
-    fmtBytes, loadTq, enqueueTq, tqCancel, tqPause, tqResume, tqClear, doSync,
+    busyEnqueue, busySync,
+    fmtBytes, loadTq, enqueueTq, tqCancel, tqPause, tqResume, tqClear, doSync, retryTask,
   }
 }

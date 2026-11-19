@@ -56,9 +56,14 @@ export async function loadTasks() {
   }
 }
 
+// 提交中防重：同一时刻只允许一条审批 / 终止请求，避免连点重复发请求。
+export const busyTask = ref<string | null>(null)
+
 export async function decideTask(id: string, approve: boolean, remember: boolean) {
+  if (busyTask.value) return
   const note = rejectNotes.value[id] || ''
   if (!approve && !note.trim()) { notify('拒绝必须填写理由'); return }
+  busyTask.value = id
   try {
     await gwFetch('/approve', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -68,11 +73,15 @@ export async function decideTask(id: string, approve: boolean, remember: boolean
     await loadTasks()
   } catch {
     notify('审批提交失败：' + (gwError.value?.message || '请求未完成'))
+  } finally {
+    busyTask.value = null
   }
 }
 
 /** A4 人工终止入口：终止网关侧仍在执行/挂起的任务（仅对活动任务生效，后端裁决）。 */
 export async function cancelTask(id: string) {
+  if (busyTask.value) return
+  busyTask.value = id
   try {
     const r = await gwFetch('/task/cancel', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -87,6 +96,8 @@ export async function cancelTask(id: string) {
     await loadTasks()
   } catch {
     notify('终止请求未完成：' + (gwError.value?.message || '网关不可用'))
+  } finally {
+    busyTask.value = null
   }
 }
 
@@ -96,5 +107,5 @@ export function startApprovalPolling() {
 }
 
 export function useApproval() {
-  return { pendingTasks, pendingTasksView, rejectNotes, pendingCount, gwDisconnected, loadTasks, decideTask, cancelTask, startApprovalPolling }
+  return { pendingTasks, pendingTasksView, rejectNotes, pendingCount, gwDisconnected, busyTask, loadTasks, decideTask, cancelTask, startApprovalPolling }
 }

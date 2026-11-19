@@ -444,8 +444,11 @@ html, body {
 .approve-actions .filter { flex: 1; min-width: 200px; }
 
 .scope-table { width: 100%; border-collapse: collapse; font-size: var(--dou-fs-sm); }
-.scope-table th, .scope-table td { border-bottom: 1px solid var(--dou-border); padding: 8px 12px; text-align: left; }
+.scope-table th, .scope-table td { border-bottom: 1px solid var(--dou-border); padding: 8px 12px; text-align: left; vertical-align: top; }
 .scope-table th { color: var(--dou-dim); font-weight: 700; }
+/* 长路径 / 命令 / 指纹在窄列内换行，不撑破表格 */
+.scope-table td { overflow-wrap: anywhere; word-break: break-word; }
+.approve-card .cmd, .approve-card .mono { overflow-wrap: anywhere; word-break: break-word; }
 
 .issued {
   background: var(--dou-ok-bg);

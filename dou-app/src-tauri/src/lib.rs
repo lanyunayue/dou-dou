@@ -1,3 +1,7 @@
+// C1 巡检解析层：纯解析 + 单测已落地；exec 采集与前端面板接线待真实靶机就绪后接入，
+// 暂未被 lib 调用，先保留避免 clippy dead_code 噪音。
+#[allow(dead_code)]
+mod inspect;
 mod monitor;
 mod pty;
 mod sftp;
@@ -161,6 +165,13 @@ async fn pty_write(
     pty::pty_write(&state, &sid, &data).await
 }
 
+/// 关闭并释放指定 PTY 会话（前端关闭标签时调用）；重复关闭视为成功。
+#[tauri::command]
+fn close_pty(state: tauri::State<'_, PtyState>, sid: String) -> Result<(), String> {
+    pty::close_pty(&state, &sid);
+    Ok(())
+}
+
 #[tauri::command]
 async fn sftp_list(
     app: tauri::AppHandle,
@@ -209,6 +220,50 @@ async fn remote_stat(
         &user,
         &resolve_key_path(key_path),
         &remote,
+    )
+    .await
+}
+
+/// A4 编辑器读通道：读取远端文本文件全文。
+#[tauri::command]
+async fn remote_read(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    key_path: String,
+    remote: String,
+) -> Result<String, String> {
+    transfer::remote_read(
+        app,
+        &host,
+        port,
+        &user,
+        &resolve_key_path(key_path),
+        &remote,
+    )
+    .await
+}
+
+/// A4 编辑器写通道：把文本覆盖写回远端文件。
+#[tauri::command]
+async fn remote_write(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    key_path: String,
+    remote: String,
+    content: String,
+) -> Result<(), String> {
+    transfer::remote_write(
+        app,
+        &host,
+        port,
+        &user,
+        &resolve_key_path(key_path),
+        &remote,
+        &content,
     )
     .await
 }
@@ -345,6 +400,17 @@ fn vault_remove_target(state: tauri::State<'_, VaultState>, name: String) -> Res
     vault::vault_remove_target(state, name)
 }
 #[tauri::command]
+fn vault_export(state: tauri::State<'_, VaultState>) -> Result<String, String> {
+    vault::vault_export(state)
+}
+#[tauri::command]
+fn vault_import(
+    state: tauri::State<'_, VaultState>,
+    source: Option<String>,
+) -> Result<usize, String> {
+    vault::vault_import(state, source)
+}
+#[tauri::command]
 fn vault_notify(app: tauri::AppHandle, unlocked: bool) {
     vault::vault_notify(app, unlocked)
 }
@@ -414,9 +480,12 @@ pub fn run() {
             open_pty,
             open_local_pty,
             pty_write,
+            close_pty,
             sftp_list,
             sftp_download,
             remote_stat,
+            remote_read,
+            remote_write,
             host_key_list,
             host_key_forget,
             tq_enqueue,
@@ -436,6 +505,8 @@ pub fn run() {
             vault_get_key,
             vault_test_connect,
             vault_remove_target,
+            vault_export,
+            vault_import,
             vault_notify
         ])
         .run(tauri::generate_context!())

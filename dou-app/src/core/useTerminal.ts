@@ -6,9 +6,14 @@ import { sendNotification } from '@tauri-apps/plugin-notification'
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
+import { SearchAddon } from 'xterm-addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { activeTarget, SSH_KEY, sshError, audit, handleSshFailure, type SshTarget } from './useSsh'
-import { notify } from '../shared/feedback'
+import { notify, notifyWarn } from '../shared/feedback'
+import { nextTabSid, prevTabSid } from '../shared/tabNav'
+import { cleanExport } from '../shared/ansi'
+import { validateConnForm } from '../shared/connForm'
+import { clampFontSize, DEFAULT_FONT_SIZE, FONT_SIZE_OPTIONS } from '../shared/termPrefs'
 import type { TerminalTab, SessionMeta } from '../shared/types'
 
 // 终端状态：多会话标签 / 当前会话 / 检索 / 广播
@@ -25,6 +30,33 @@ let windowFocused = true
 // localStorage；重启后终端区提供「恢复上次会话」一键入口。密码认证会话无法
 // 自动恢复（密码不落盘是有意为之的安全边界），恢复时跳过并计数提示。
 const SESSION_META_KEY = 'dou_session_meta'
+
+// 终端字号偏好（localStorage 持久化，档位解析见 shared/termPrefs）。
+const FONT_SIZE_KEY = 'dou_term_fontsize'
+
+function readFontSize(): number {
+  try { return clampFontSize(localStorage.getItem(FONT_SIZE_KEY)) } catch { return DEFAULT_FONT_SIZE }
+}
+export const termFontSize = ref(readFontSize())
+export const FONT_SIZE_OPTIONS_EXPORT = FONT_SIZE_OPTIONS
+
+/** 设置字号并持久化；已存在会话同步重排。 */
+export function setTermFontSize(size: number) {
+  termFontSize.value = clampFontSize(size)
+  try { localStorage.setItem(FONT_SIZE_KEY, String(termFontSize.value)) } catch { /* 存储不可用时跳过 */ }
+  applyFontSize()
+}
+
+/** 把当前字号应用到所有已存在会话（新建会话在 createTerm 读取同一偏好）。 */
+export function applyFontSize() {
+  for (const t of tabs.value) {
+    t.term.options.fontSize = termFontSize.value
+    try { t.fit?.fit() } catch { /* 容器未就绪时跳过 */ }
+  }
+}
+
+// 最近一次连接使用的认证方式：供「一键重试」判断是否应回到表单重输密码。
+export const lastAuth = ref<'key' | 'password'>('key')
 
 export const lastSessions = ref<SessionMeta[]>(readLastSessions())
 export const restoringSessions = ref(false)
@@ -97,11 +129,13 @@ function onTermContextMenu(ev: MouseEvent) {
   termCtxMenu.value = { visible: true, x, y }
 }
 
-// 每会话独立的 xterm 实例（fit 插件随标签保存，切换显示时按容器重排）
-function createTerm(): { term: Terminal; fit: FitAddon } {
-  const term = new Terminal({ fontSize: 13, convertEol: true })
+// 每会话独立的 xterm 实例（fit / search 插件随标签保存，切换显示时按容器重排）
+function createTerm(): { term: Terminal; fit: FitAddon; search: SearchAddon } {
+  const term = new Terminal({ fontSize: termFontSize.value, convertEol: true })
   const fit = new FitAddon()
   term.loadAddon(fit)
+  const search = new SearchAddon()
+  term.loadAddon(search)
   term.open(termEl.value!)
   try { fit.fit() } catch { /* 容器未就绪时跳过，切换标签时再 fit */ }
   // F-05：优先 WebGL，初始化失败自动回退 Canvas（渲染器回退，非连接错误）
@@ -124,7 +158,7 @@ function createTerm(): { term: Terminal; fit: FitAddon } {
     termEl.value.addEventListener('contextmenu', onTermContextMenu)
     ctxMenuBoundEl = termEl.value
   }
-  return { term, fit }
+  return { term, fit, search }
 }
 
 // R13 右键菜单动作：作用于当前活动会话，动作后关闭菜单
@@ -158,20 +192,22 @@ export interface ConnectOptions extends SshTarget {
 }
 
 export async function connectSsh(o: ConnectOptions) {
+  // 校验规则复用 shared/connForm 纯函数（与连接表单同一套口径，避免双份漂移）。
+  const errors = validateConnForm({
+    host: o.host, port: String(o.port), user: o.user,
+    auth: o.auth, password: o.password,
+  })
+  const first = errors.host || errors.port || errors.user || errors.password
+  if (first) { sshError.value = first; return }
+
   const host = o.host.trim(), user = o.user.trim()
-  if (!host) { sshError.value = '请填写主机地址'; return }
-  if (!user) { sshError.value = '请填写用户名'; return }
-  if (!(o.port >= 1 && o.port <= 65535)) { sshError.value = '端口需在 1-65535 之间'; return }
-  if (o.auth === 'password' && !o.password) {
-    sshError.value = '密码认证：请填写连接密码（仅驻留内存，不落盘）'
-    return
-  }
   try {
     const sid = await invoke('open_pty', {
       host, port: o.port, user, keyPath: SSH_KEY,
       password: o.auth === 'password' ? o.password : undefined,
     }) as string
     sshError.value = ''
+    lastAuth.value = o.auth
     activeTarget.value = { host, port: o.port, user }
     attachSession(sid, `${user}@${host}`, `[已连接 ${user}@${host}:${o.port}（${o.auth === 'password' ? '密码' : '密钥'}认证）]\r\n`, {
       meta: { kind: 'ssh', title: `${user}@${host}`, host, port: o.port, user, auth: o.auth, ts: Date.now() },
@@ -186,11 +222,11 @@ export async function connectSsh(o: ConnectOptions) {
 // 会话落地共用件：创建 xterm、写欢迎行、注册键盘写入、入 tabs（连接表单/档案连接/本地 Shell 共用）
 // R4：fit 产生的 resize 一律上报 pty_resize（ConPTY 会话同步尺寸，其余模式 Rust 侧 no-op）
 function attachSession(sid: string, title: string, welcome: string, extra?: Partial<TerminalTab>) {
-  const { term, fit } = createTerm()
+  const { term, fit, search } = createTerm()
   term.write(welcome)
   term.onData(async (data) => { await invoke('pty_write', { sid, data }).catch(()=>{}) })
   term.onResize(({ cols, rows }) => { void invoke('pty_resize', { sid, cols, rows }).catch(()=>{}) })
-  tabs.value.push({ sid, title, term, fit, ...extra })
+  tabs.value.push({ sid, title, term, fit, search, ...extra })
   activeSid.value = sid
   showConnectForm.value = false
   showActiveTerm()
@@ -245,6 +281,7 @@ export async function connectByTarget(t: ArchiveTarget, password?: string): Prom
       password: password ?? undefined,
     }) as string
     sshError.value = ''
+    lastAuth.value = t.enc_key ? 'key' : 'password'
     activeTarget.value = { host: t.host, port: t.port, user: t.user }
     attachSession(sid, `${t.user}@${t.host}`, `[已连接 ${t.user}@${t.host}:${t.port}（档案「${t.name}」，${t.enc_key ? '密钥' : '密码'}认证）]\r\n`, {
       meta: {
@@ -277,6 +314,54 @@ export function closeTab(sid: string) {
   if (activeSid.value === sid && tabs.value.length) switchTab(tabs.value[0].sid)
   else showActiveTerm()
   persistSessionMeta()
+  // 通知后端释放该 PTY 会话 / 子进程句柄；前端标签先移除，后端清理失败只记审计，不阻塞关闭。
+  invoke('close_pty', { sid })
+    .catch((e) => audit.value.unshift(`[${new Date().toLocaleTimeString()}] 关闭会话 ${sid.slice(0,8)} 后端清理失败：${String(e?.message ?? e).slice(0, 80)}`))
+}
+
+// R15 标签快捷键：Ctrl+Tab 下一个 / Ctrl+Shift+Tab 上一个 / Ctrl+W 关闭当前。
+// 导航为环形；无标签时动作空转。
+export function nextTab() {
+  const n = nextTabSid(tabs.value.map(t => t.sid), activeSid.value)
+  if (n) switchTab(n)
+}
+
+export function prevTab() {
+  const n = prevTabSid(tabs.value.map(t => t.sid), activeSid.value)
+  if (n) switchTab(n)
+}
+
+export function closeActiveTab() {
+  if (activeSid.value) closeTab(activeSid.value)
+}
+
+// R14 终端查找：查找条可见性 + 查询词，作用于当前活动标签的 search 插件。
+// 第一版用选区定位当前匹配（不挂全量装饰色）；默认忽略大小写、非正则。
+export const searchVisible = ref(false)
+export const searchQuery = ref('')
+
+function activeSearch(): SearchAddon | undefined {
+  return tabs.value.find(x => x.sid === activeSid.value)?.search
+}
+
+export function openSearch() { searchVisible.value = true }
+
+export function closeSearch() {
+  searchVisible.value = false
+  searchQuery.value = ''
+  activeSearch()?.clearDecorations()
+}
+
+export function findNextMatch() {
+  const q = searchQuery.value
+  if (!q) return
+  activeSearch()?.findNext(q, { caseSensitive: false })
+}
+
+export function findPrevMatch() {
+  const q = searchQuery.value
+  if (!q) return
+  activeSearch()?.findPrevious(q, { caseSensitive: false })
 }
 
 // R11：一键恢复上次会话。本地 Shell 直接重开；密钥认证档案按存档参数重连；
@@ -305,15 +390,6 @@ export async function restoreLastSessions() {
   }
 }
 
-export function cleanExport(raw: string): string {
-  return raw
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')   // ANSI CSI
-    .replace(/\x1b\][^\x07]*\x07/g, '')        // OSC
-    .replace(/\x0c/g, '')                       // 分页符
-    .replace(/[^\n]*\r/g, '')                   // 回车覆盖字节
-    .replace(/\x1b[()][AB012]/g, '')            // 字符集切换
-}
-
 export function exportTerm() {
   const t = tabs.value.find(x=>x.sid===activeSid.value)
   if (!t) return
@@ -332,6 +408,10 @@ export function exportTerm() {
 export async function doBroadcast() {
   const cmd = broadcast.value + '\n'
   const targets = tabs.value.filter(t => t.selected)
+  // 未勾选任何会话时语义为「发给全部」，先明确提示，避免误以为只发勾选项。
+  if (!targets.length && tabs.value.length) {
+    notifyWarn(`未勾选会话：命令将发送到全部 ${tabs.value.length} 个会话`)
+  }
   const list = targets.length ? targets : tabs.value
   for (const t of list) {
     await invoke('pty_write', { sid: t.sid, data: cmd }).catch(() => {
@@ -378,11 +458,23 @@ export function useTerminal() {
     sessionFilter,
     broadcast,
     visibleTabs,
+    termFontSize,
+    setTermFontSize,
+    lastAuth,
     connectSsh,
     toggleConnectForm,
     openLocalTab,
     switchTab,
     closeTab,
+    nextTab,
+    prevTab,
+    closeActiveTab,
+    searchVisible,
+    searchQuery,
+    openSearch,
+    closeSearch,
+    findNextMatch,
+    findPrevMatch,
     cleanExport,
     exportTerm,
     doBroadcast,
