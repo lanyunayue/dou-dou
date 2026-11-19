@@ -26,9 +26,10 @@ for p in sorted(root.rglob("*")):
 # （connectByTarget）取代，vault_test_connect 移出前端基线；Rust 侧保留仅为兼容。
 # 2026-11-18 补：open_local_pty / pty_resize / vault_status 为历史既有前端调用；
 # vault_export / vault_import 为档案换机迁移命令。
+# 2026-11-19 补：close_pty（PTY 关闭）、remote_read / remote_write（A4 编辑器读写）。
 # 注：generate_handler![] 注册数与前端基线条数口径不同，部分命令前端不直接调用。
 base = set("""gateway_request gateway_status gateway_token host_key_forget host_key_list
-open_local_pty open_pty pty_resize pty_write close_pty remote_stat sftp_download sftp_list
+open_local_pty open_pty pty_resize pty_write close_pty remote_read remote_write remote_stat sftp_download sftp_list
 sync_folders tq_cancel tq_clear tq_enqueue tq_list tq_pause tq_resume
 vault_add_target vault_export vault_get_key vault_import vault_init
 vault_list_targets vault_lock vault_remove_target vault_status vault_unlock""".split())
